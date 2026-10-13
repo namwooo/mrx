@@ -1,5 +1,7 @@
-from ultralytics import YOLO
+from fastapi import FastAPI
 
-model = YOLO("../.models/yolo11/yolo11n.pt")
-result = model.predict("/Users/youngchankim/Projects/mrx/.data/000000581918.jpg")
-print(result)
+app = FastAPI(title="YOLO11")
+
+@app.post("/predict")
+def predict():
+    pass
