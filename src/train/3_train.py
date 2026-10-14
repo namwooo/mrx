@@ -9,7 +9,7 @@ from ultralytics import YOLO
 BASE_MODEL_PATH = "/Users/youngchankim/projects/mrx/models/yolo11/yolo11n.pt"
 DATASET_YAML_PATH = "/Users/youngchankim/projects/mrx/data/dataset.yaml"
 OUTPUT_DIR = "/Users/youngchankim/projects/mrx/artifacts/runs"
-RUN_NAME = str(uuid.uuid4())
+RUN_ID = str(uuid.uuid4())
 
 
 def check_environment():
@@ -51,7 +51,7 @@ def main():
             batch=16,
             device=device,
             project=OUTPUT_DIR,
-            name=RUN_NAME,
+            name=RUN_ID,
             plots=False,
             workers=4,
 
