@@ -8,7 +8,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 FROM = "youngchan.kim@makinarocks.ai"
-PASSWORD = "rqafpevrxpcjoqwr"
+PASSWORD = ""
 SMTP_HOST, SMTP_PORT = "smtp.gmail.com", 465
 TIMEOUT = 600
 MAX_BYTES = 18 * 1024 * 1024
