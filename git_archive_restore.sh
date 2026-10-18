@@ -16,8 +16,8 @@ ARCHIVE_DIR="archives/${TARGET_COMMIT}"
 PREFIX_PATH="${ARCHIVE_DIR}/${TARGET_COMMIT}.tar.gz."
 
 # Check if the split archive files actually exist
-if [ ! -f "${PREFIX_PATH}00" ]; then
-    echo "❌ Error: Cannot find archive files at [${PREFIX_PATH}00]"
+if [ ! -f "${PREFIX_PATH}000" ]; then
+    echo "❌ Error: Cannot find archive files at [${PREFIX_PATH}000]"
     echo "Please check if 'archives/${TARGET_COMMIT}' directory exists."
     exit 1
 fi
