@@ -128,3 +128,56 @@ def cancel_job(job_id: int, job_type: Optional[JobType] = None) -> Optional[Dict
     if job is None or (job_type and job["job_type"] != JobType(job_type)):
         return None
     return job
+
+
+def claim_next_job(job_type: JobType, worker_id: str) -> Optional[Dict[str, Any]]:
+    job_type = JobType(job_type)
+
+    while True:
+        with engine.begin() as conn:
+            job_id = conn.execute(
+                select(jobs.c.id)
+                .where(jobs.c.job_type == job_type, jobs.c.status == JobStatus.QUEUED)
+                .order_by(jobs.c.id)
+                .limit(1)
+            ).scalar()
+            if job_id is None:
+                return None
+
+            now = _now()
+            claimed = conn.execute(
+                update(jobs)
+                .where(jobs.c.id == job_id, jobs.c.status == JobStatus.QUEUED)
+                .values(
+                    status=JobStatus.RUNNING,
+                    worker_id=worker_id,
+                    started_at=now,
+                    updated_at=now,
+                )
+            ).rowcount
+
+        if claimed == 1:
+            return get_job(job_id)
+
+
+def _finish_job(job_id: int, worker_id: str, status: JobStatus, **values: Any) -> bool:
+    now = _now()
+    with engine.begin() as conn:
+        updated = conn.execute(
+            update(jobs)
+            .where(
+                jobs.c.id == job_id,
+                jobs.c.worker_id == worker_id,
+                jobs.c.status == JobStatus.RUNNING,
+            )
+            .values(status=status, updated_at=now, finished_at=now, **values)
+        ).rowcount
+    return updated == 1
+
+
+def complete_job(job_id: int, worker_id: str, result: Optional[Dict[str, Any]] = None) -> bool:
+    return _finish_job(job_id, worker_id, JobStatus.SUCCEEDED, result=result)
+
+
+def fail_job(job_id: int, worker_id: str, error: str) -> bool:
+    return _finish_job(job_id, worker_id, JobStatus.FAILED, error=error)
