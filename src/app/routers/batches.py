@@ -26,8 +26,8 @@ def list_batch_jobs(
 
 
 @router.get("/{batch_id}", summary="Get batch job status and result")
-def get_batch_job():
-    pass
+def get_batch_job(batch_id: int):
+    return batch_service.get_batch_job(batch_id)
 
 
 @router.delete("/{batch_id}", summary="Revoke or cancel batch job")

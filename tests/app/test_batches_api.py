@@ -53,3 +53,22 @@ def test_list_pagination(client):
     assert [j["id"] for j in page1] == newest_first[0:2]
     assert [j["id"] for j in page2] == newest_first[2:4]
     assert [j["id"] for j in page3] == newest_first[4:5]
+
+
+def test_get_batch(client):
+    job = _create(client)
+    assert client.get(f"/batches/{job['id']}").json()["id"] == job["id"]
+
+
+def test_get_missing_batch_returns_404(client):
+    assert client.get("/batches/99999").status_code == 404
+
+
+def test_get_non_integer_id_returns_422(client):
+    assert client.get("/batches/abc").status_code == 422
+
+
+def test_get_returns_current_status(client, app_db):
+    job = _create(client)
+    _set_status(app_db, job["id"], "running")
+    assert client.get(f"/batches/{job['id']}").json()["status"] == "running"
