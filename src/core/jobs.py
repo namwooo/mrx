@@ -1,8 +1,9 @@
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from enum import Enum
+from typing import Dict, Any, Optional, List
 
 from core.db import engine
-from sqlalchemy import Table, Column, Integer, MetaData, String, Enum, JSON, Text, DateTime, Index, select, insert
+from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert
 from sqlalchemy.exc import IntegrityError
 
 
@@ -89,3 +90,22 @@ def get_job(job_id: int) -> Optional[Dict[Any, Any]]:
     with engine.connect() as conn:
         row = conn.execute(select(jobs).where(jobs.c.id == job_id)).mappings().first()
     return dict(row) if row else None
+
+
+def list_jobs(
+        job_type: Optional[JobType] = None,
+        status: Optional[JobStatus] = None,
+        limit: int = 50,
+        offset: int = 0,
+) -> List[Dict[Any, Any]]:
+    stmt = select(jobs)
+    if job_type:
+        stmt = stmt.where(jobs.c.job_type == JobType(job_type))
+    if status:
+        stmt = stmt.where(jobs.c.status == JobStatus(status))
+
+    stmt = stmt.order_by(jobs.c.id.desc()).limit(limit).offset(offset)
+
+    with engine.connect() as conn:
+        rows = conn.execute(stmt).mappings().all()
+    return [dict(r) for r in rows]
