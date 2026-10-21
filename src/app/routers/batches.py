@@ -1,7 +1,7 @@
 from typing import Optional
 
 from core import jobs as job_repo
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Path
 from app.schemas.batch import BatchJobCreate
 from app.services import batch as batch_service
 
@@ -26,10 +26,10 @@ def list_batch_jobs(
 
 
 @router.get("/{batch_id}", summary="Get batch job status and result")
-def get_batch_job(batch_id: int):
+def get_batch_job(batch_id: int = Path(ge=1)):
     return batch_service.get_batch_job(batch_id)
 
 
 @router.delete("/{batch_id}", summary="Revoke or cancel batch job")
-def revoke_batch_job():
-    pass
+def revoke_batch_job(batch_id: int = Path(ge=1)):
+    return batch_service.revoke_batch_job(batch_id)

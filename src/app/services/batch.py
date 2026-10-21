@@ -35,3 +35,15 @@ def get_batch_job(batch_id: int) -> Dict[Any, Any]:
     if job is None or job["job_type"] != JOB_TYPE:
         raise HTTPException(status_code=404, detail="batch job not found")
     return job
+
+
+def revoke_batch_job(batch_id: int) -> Dict[str, Any]:
+    job = job_repo.cancel_job(batch_id, job_type=JOB_TYPE)
+    if job is None:
+        raise HTTPException(status_code=404, detail="batch job not found")
+    if job["status"] != job_repo.JobStatus.CANCELED:
+        raise HTTPException(
+            status_code=409,
+            detail=f"cannot cancel batch job in '{job['status']}' status",
+        )
+    return job

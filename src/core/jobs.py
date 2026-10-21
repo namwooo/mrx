@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Dict, Any, Optional, List
 
 from core.db import engine
-from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert
+from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert, update
 from sqlalchemy.exc import IntegrityError
 
 
@@ -109,3 +109,22 @@ def list_jobs(
     with engine.connect() as conn:
         rows = conn.execute(stmt).mappings().all()
     return [dict(r) for r in rows]
+
+
+def cancel_job(job_id: int, job_type: Optional[JobType] = None) -> Optional[Dict[str, Any]]:
+    now = _now()
+    conditions = [jobs.c.id == job_id, jobs.c.status == JobStatus.QUEUED]
+    if job_type:
+        conditions.append(jobs.c.job_type == JobType(job_type))
+
+    with engine.begin() as conn:
+        conn.execute(
+            update(jobs)
+            .where(*conditions)
+            .values(status=JobStatus.CANCELED, updated_at=now, finished_at=now)
+        )
+
+    job = get_job(job_id)
+    if job is None or (job_type and job["job_type"] != JobType(job_type)):
+        return None
+    return job

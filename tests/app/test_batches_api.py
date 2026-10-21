@@ -72,3 +72,45 @@ def test_get_returns_current_status(client, app_db):
     job = _create(client)
     _set_status(app_db, job["id"], "running")
     assert client.get(f"/batches/{job['id']}").json()["status"] == "running"
+
+
+def test_cancel_queued_batch(client):
+    job = _create(client)
+    res = client.delete(f"/batches/{job['id']}")
+    assert res.status_code == 200
+    assert res.json()["status"] == "canceled"
+    assert res.json()["finished_at"] is not None
+
+
+def test_cancel_twice_returns_canceled_both_times(client):
+    job = _create(client)
+    assert client.delete(f"/batches/{job['id']}").json()["status"] == "canceled"
+    second = client.delete(f"/batches/{job['id']}")
+    assert second.status_code == 200
+    assert second.json()["status"] == "canceled"
+
+
+def test_canceled_batch_is_not_picked_as_queued(client):
+    job = _create(client)
+    client.delete(f"/batches/{job['id']}")
+    assert client.get("/batches/", params={"status": "queued"}).json() == []
+
+
+def test_cancel_finished_batch_returns_409(client, app_db):
+    for status in ("succeeded", "failed"):
+        job = _create(client)
+        _set_status(app_db, job["id"], status)
+        res = client.delete(f"/batches/{job['id']}")
+        assert res.status_code == 409
+        assert status in res.json()["detail"]
+
+
+def test_cancel_missing_or_invalid_id(client):
+    assert client.delete("/batches/99999").status_code == 404
+    assert client.delete("/batches/0").status_code == 422
+
+
+def test_cancel_running_batch_returns_409(client, app_db):
+    job = _create(client)
+    _set_status(app_db, job["id"], "running")
+    assert client.delete(f"/batches/{job['id']}").status_code == 409
