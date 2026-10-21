@@ -1,5 +1,8 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
+from core.db import engine
+from core.jobs import metadata
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -8,9 +11,15 @@ from .routers import batches, trainings, models
 STATIC_DIR = Path(__file__).parent / "static"
 OPENAPI_URL = "/openapi.json"
 
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    metadata.create_all(engine)
+    yield
+
 app = FastAPI(
     title="MRX Asynchronous API",
     version="0.1.0",
+    lifespan=lifespan,
     openapi_url=OPENAPI_URL,
 )
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
