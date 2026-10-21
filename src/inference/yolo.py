@@ -5,9 +5,10 @@ class YOLO:
     def __init__(self, model: str) -> None:
         self.model = UYOLO(model)
 
-    def predict(self, source: list[np.ndarray]):
+    def predict(self, source: list[np.ndarray], **kwargs):
         results = self.model.predict(
-            source=source
+            source=source,
+            **kwargs
         )
 
         return results
