@@ -21,6 +21,6 @@ def get_training_job():
 def revoke_training_job():
     pass
 
-@router.delete("/{training_id}/artifacts", summary="Get training job artifacts")
+@router.get("/{training_id}/artifacts", summary="Get training job artifacts")
 def get_training_artifacts():
     pass
