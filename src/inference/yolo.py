@@ -22,6 +22,7 @@ class YOLO:
             embed_layers: Optional[list[int]] = None,
             feature_layers: Optional[list[int]] = None
     ) -> None:
+        print("model_path", model_path)
         self.model = UYOLO(model_path)
 
         self.embed_layers = embed_layers or DEFAULT_NECK_LAYERS

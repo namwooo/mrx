@@ -1,0 +1,13 @@
+# Only src/, requirements-app.txt and docker/ are needed in the build.
+.git
+.idea
+.local
+.venv-app
+.venv-train
+**/__pycache__
+**/*.pyc
+docs
+log
+tests
+wheels_pool
+*.db

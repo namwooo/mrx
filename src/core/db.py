@@ -16,4 +16,4 @@ def create_db_engine(path: str) -> Engine:
 
     return engine
 
-engine = create_db_engine(os.environ.get("DB_PATH", "./.local/local.db"))
+engine = create_db_engine(os.environ.get("DB_PATH", "./data/local.db"))
