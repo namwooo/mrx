@@ -1,9 +1,11 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Any, Optional, List
 
 from core.db import engine
-from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert, update
+from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert, update, \
+    RowMapping
 from sqlalchemy.exc import IntegrityError
 
 
@@ -39,23 +41,44 @@ jobs = Table(
     sqlite_autoincrement=True,
 )
 
+
+@dataclass(frozen=True)
+class Job:
+    id: int
+    job_type: JobType
+    status: JobStatus
+    payload: Dict[str, Any]
+    result: Optional[Dict[str, Any]]
+    error: Optional[str]
+    worker_id: Optional[str]
+    idempotency_key: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+    started_at: Optional[datetime]
+    finished_at: Optional[datetime]
+
+    @classmethod
+    def from_row(cls, row: RowMapping) -> "Job":
+        return cls(**row)
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _get_by_key(idempotency_key: str) -> Optional[Dict[Any, Any]]:
+def _get_by_key(idempotency_key: str) -> Optional[Job]:
     with engine.connect() as conn:
         row = conn.execute(
             select(jobs).where(jobs.c.idempotency_key == idempotency_key)
         ).mappings().first()
-    return dict(row) if row else None
+    return Job.from_row(row) if row else None
 
 
 def enqueue_job(
         job_type: JobType,
         payload: Dict[str, Any],
         idempotency_key: Optional[str] = None,
-) -> Dict[Any, Any] | None:
+) -> Job | None:
     job_type = JobType(job_type)
 
     if idempotency_key:
@@ -86,10 +109,10 @@ def enqueue_job(
     return get_job(job_id)
 
 
-def get_job(job_id: int) -> Optional[Dict[Any, Any]]:
+def get_job(job_id: int) -> Optional[Job]:
     with engine.connect() as conn:
         row = conn.execute(select(jobs).where(jobs.c.id == job_id)).mappings().first()
-    return dict(row) if row else None
+    return Job.from_row(row) if row else None
 
 
 def list_jobs(
@@ -97,7 +120,7 @@ def list_jobs(
         status: Optional[JobStatus] = None,
         limit: int = 50,
         offset: int = 0,
-) -> List[Dict[Any, Any]]:
+) -> List[Job]:
     stmt = select(jobs)
     if job_type:
         stmt = stmt.where(jobs.c.job_type == JobType(job_type))
@@ -108,10 +131,10 @@ def list_jobs(
 
     with engine.connect() as conn:
         rows = conn.execute(stmt).mappings().all()
-    return [dict(r) for r in rows]
+    return [Job.from_row(r) for r in rows]
 
 
-def cancel_job(job_id: int, job_type: Optional[JobType] = None) -> Optional[Dict[str, Any]]:
+def cancel_job(job_id: int, job_type: Optional[JobType] = None) -> Optional[Job]:
     now = _now()
     conditions = [jobs.c.id == job_id, jobs.c.status == JobStatus.QUEUED]
     if job_type:
@@ -125,12 +148,12 @@ def cancel_job(job_id: int, job_type: Optional[JobType] = None) -> Optional[Dict
         )
 
     job = get_job(job_id)
-    if job is None or (job_type and job["job_type"] != JobType(job_type)):
+    if job is None or (job_type and job.job_type != JobType(job_type)):
         return None
     return job
 
 
-def claim_next_job(job_type: JobType, worker_id: str) -> Optional[Dict[str, Any]]:
+def claim_next_job(job_type: JobType, worker_id: str) -> Optional[Job]:
     job_type = JobType(job_type)
 
     while True:

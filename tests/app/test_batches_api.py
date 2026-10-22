@@ -57,7 +57,8 @@ def test_list_pagination(client):
 
 def test_get_batch(client):
     job = _create(client)
-    assert client.get(f"/batches/{job['id']}").json()["id"] == job["id"]
+    print(job)
+    assert client.get(f"/batches/{job["id"]}").json()["id"] == job["id"]
 
 
 def test_get_missing_batch_returns_404(client):
