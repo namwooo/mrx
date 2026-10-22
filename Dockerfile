@@ -43,6 +43,8 @@ RUN mkdir -p /demo_images \
 
 COPY models/ /models/
 ADD --chmod=644 https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11m.pt /models/yolo11/yolo11m.pt
+RUN chmod -R a+rX /models
+
 COPY dataset/coco128/images/val /demo_images
 COPY src/ src/
 
