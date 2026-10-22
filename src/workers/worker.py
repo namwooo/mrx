@@ -35,7 +35,7 @@ class Worker:
         if job is None:
             return False
 
-        job_id = job["id"]
+        job_id = job.id
         logger.info("job %s starts (worker=%s)", job_id, self.worker_id)
 
         try:

@@ -7,6 +7,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Iterator
 
+from core.jobs import Job
+from inference.yolo import Detection
+
 logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -17,9 +20,9 @@ MODEL_DIR = Path(os.environ.get("MODEL_DIR", "./models/yolo11"))
 
 CHUNK_SIZE = int(os.environ.get("BATCH_CHUNK_SIZE", "16"))
 
-def handle_batch_job(job: Dict[str, Any]) -> Dict[str, Any]:
-    job_id = job["id"]
-    payload = job["payload"]
+def handle_batch_job(job: Job) -> Dict[str, Any]:
+    job_id = job.id
+    payload = job.payload
     model = payload["model"]
     input_path = payload["input_path"]
     params = payload.get("params", {})
@@ -28,7 +31,7 @@ def handle_batch_job(job: Dict[str, Any]) -> Dict[str, Any]:
     if not images:
         raise ValueError(f"no images found in {payload['input_path']}")
 
-    logger.info("batch job %s: model=%s input=%s params=%s", job["id"], model, input_path, params)
+    logger.info("batch job %s: model=%s input=%s params=%s", job.id, model, input_path, params)
 
     model = _load_model(payload["model"])
 
@@ -36,8 +39,6 @@ def handle_batch_job(job: Dict[str, Any]) -> Dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / "predictions.jsonl"
     tmp_path = out_path.with_suffix(".jsonl.part")
-
-    # TODO: 동운님이 개발한 inference 모듈의 실제 추론 함수를 여기서 호출
 
     with tmp_path.open("w", encoding="utf-8") as f:
         for chunk in _chunks(images, CHUNK_SIZE):
@@ -52,9 +53,13 @@ def handle_batch_job(job: Dict[str, Any]) -> Dict[str, Any]:
             if not arrays:
                 continue
 
-            results = model.predict(arrays)
-            for path, result in zip(paths, results):
-                record = _result_to_dict(path, result)
+            try:
+                detections_per_image = model.predict(arrays)
+            finally:
+                model.release()  # free feature maps (GPU memory) after every chunk
+
+            for path, detections in zip(paths, detections_per_image):
+                record = _to_record(path, detections, model.model.names)
                 f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     tmp_path.replace(out_path)
@@ -69,7 +74,7 @@ def _load_model(model: str):
     from inference.yolo import YOLO
 
     logger.info("model loading: %s", model)
-    return YOLO(model)
+    return YOLO(model_path=model)
 
 
 def _list_images(input_path: str) -> List[Path]:
@@ -92,16 +97,16 @@ def _read_image(path: Path):
     return cv2.imread(str(path))
 
 
-def _result_to_dict(image_path: Path, result) -> Dict[str, Any]:
-    detections = []
-    boxes = result.boxes
-    if boxes is not None:
-        for xyxy, conf, cls in zip(boxes.xyxy.tolist(), boxes.conf.tolist(), boxes.cls.tolist()):
-            class_id = int(cls)
-            detections.append({
-                "class_id": class_id,
-                "class_name": result.names[class_id],
-                "confidence": round(float(conf), 4),
-                "bbox_xyxy": [round(float(v), 2) for v in xyxy],
-            })
-    return {"image": str(image_path), "detections": detections}
+def _to_record(image_path: Path, detections: List["Detection"], names: List[str]) -> Dict[str, Any]:
+    return {
+        "image": str(image_path),
+        "detections": [
+            {
+                "class_id": d["class_id"],
+                "class_name": names[d["class_id"]],
+                "confidence": round(d["confidence"], 4),
+                "bbox_xyxy": [round(v, 2) for v in d["xyxy"]],
+            }
+            for d in detections
+        ],
+    }
