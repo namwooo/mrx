@@ -7,4 +7,4 @@ __pycache__/
 .idea
 artifacts
 archives
-.local
+.localinfra/seaweedfs/dist/**/weed
