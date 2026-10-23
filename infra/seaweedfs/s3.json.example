@@ -1,0 +1,14 @@
+{
+  "identities": [
+    {
+      "name": "admin",
+      "credentials": [{"accessKey": "admin", "secretKey": "CHANGE_ME_ADMIN_SECRET"}],
+      "actions": ["Admin", "Read", "Write", "List", "Tagging"]
+    },
+    {
+      "name": "mrx-app",
+      "credentials": [{"accessKey": "mrx-app", "secretKey": "CHANGE_ME_APP_SECRET"}],
+      "actions": ["Read:mrx-*", "Write:mrx-*", "List:mrx-*", "Tagging:mrx-*"]
+    }
+  ]
+}
