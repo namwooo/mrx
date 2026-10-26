@@ -89,6 +89,7 @@ git bundle verify mrx.bundle
 GIT_LFS_SKIP_SMUDGE=1 git clone mrx.bundle mrx
 cd mrx
 tar -xzf ../lfs.tar.gz                             # .git/lfs/objects 로 풀림
+git switch main 
 git lfs checkout                                   # 포인터 → 실제 파일
 git lfs fsck                                       # 누락·손상 검사
 git log -1 --oneline                               # 보낸 쪽 main과 같은 커밋인지 확인
