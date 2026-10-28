@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError
 class JobType(str, Enum):
     TRAINING = "training"
     BATCH = "batch"
+    LABELING = "labeling"
 
 class JobStatus(str, Enum):
     QUEUED = "queued"
