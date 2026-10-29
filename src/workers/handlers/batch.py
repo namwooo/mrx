@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Iterator
 
 from core.jobs import Job
-from inference.yolo import Detection
+from inference.predictor import RawDetection
 
 logger = logging.getLogger(__name__)
 
@@ -53,10 +53,7 @@ def handle_batch_job(job: Job) -> Dict[str, Any]:
             if not arrays:
                 continue
 
-            try:
-                detections_per_image = model.predict(arrays)
-            finally:
-                model.release()  # free feature maps (GPU memory) after every chunk
+            detections_per_image = model.predict(arrays)
 
             for path, detections in zip(paths, detections_per_image):
                 record = _to_record(path, detections, model.model.names)
@@ -71,10 +68,10 @@ def handle_batch_job(job: Job) -> Dict[str, Any]:
 
 @lru_cache(maxsize=2)
 def _load_model(model: str):
-    from inference.yolo import YOLO
+    from inference.yolo import YoloPredictor
 
     logger.info("model loading: %s", model)
-    return YOLO(model_path=model)
+    return YoloPredictor(model)
 
 
 def _list_images(input_path: str) -> List[Path]:
@@ -97,7 +94,7 @@ def _read_image(path: Path):
     return cv2.imread(str(path))
 
 
-def _to_record(image_path: Path, detections: List["Detection"], names: List[str]) -> Dict[str, Any]:
+def _to_record(image_path: Path, detections: List[RawDetection], names: List[str]) -> Dict[str, Any]:
     return {
         "image": str(image_path),
         "detections": [

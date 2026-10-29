@@ -10,10 +10,10 @@ class RawDetection(TypedDict):
     xyxy: list[float]
 
 
-ImageDetection = list[RawDetection]
+ImageDetections = list[RawDetection]
 
 
 class Predictor(ABC):
     @abstractmethod
-    def predict(self, images: list[np.ndarray], **options: Any) -> list[ImageDetection]:
+    def predict(self, images: list[np.ndarray], **options: Any) -> list[ImageDetections]:
         """Return one list of detections per image."""

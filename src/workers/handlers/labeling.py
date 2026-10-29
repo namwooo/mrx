@@ -55,15 +55,12 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
             if not arrays:
                 continue
 
-            try:
-                detections_per_image = model.predict(
-                    arrays,
-                    conf=params.get("conf", 0.25),
-                    iou=params.get("iou", 0.7),
-                    max_det=params.get("max_det", 300),
-                )
-            finally:
-                model.release()  # free feature maps (GPU memory) after every chunk
+            detections_per_image = model.predict(
+                arrays,
+                conf=params.get("conf", 0.25),
+                iou=params.get("iou", 0.7),
+                max_det=params.get("max_det", 300),
+            )
 
             for path, array, detections in zip(paths, arrays, detections_per_image):
                 height, width = array.shape[:2]
@@ -82,10 +79,10 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
 
 @lru_cache(maxsize=2)
 def _load_model(model: str):
-    from inference.yolo import YOLO
+    from inference.yolo import YoloPredictor
 
     logger.info("model loading: %s", model)
-    return YOLO(model_path=model)
+    return YoloPredictor(model)
 
 
 def _to_record(
