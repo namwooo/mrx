@@ -9,7 +9,7 @@ from workers.handlers import labeling
 
 
 class FakeModel:
-    """Stands in for inference.yolo.YOLO: same predict()/release()/model.names surface."""
+    """Stands in for inference.yolo.YoloPredictor: same predict()/model.names surface."""
 
     def __init__(self, detections_by_width):
         self.detections_by_width = detections_by_width
@@ -19,9 +19,6 @@ class FakeModel:
     def predict(self, images, *, conf, iou, max_det):
         self.calls.append({"n": len(images), "conf": conf, "iou": iou, "max_det": max_det})
         return [self.detections_by_width.get(img.shape[1], []) for img in images]
-
-    def release(self):
-        pass
 
 
 def _job(input_path, params=None):

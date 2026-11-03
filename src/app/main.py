@@ -1,8 +1,7 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from core.db import engine
-from core.jobs import metadata
+from core.migrate import upgrade_db
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -13,7 +12,7 @@ OPENAPI_URL = "/openapi.json"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    metadata.create_all(engine)
+    upgrade_db()
     yield
 
 app = FastAPI(

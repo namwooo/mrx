@@ -1,7 +1,13 @@
+import os
+import tempfile
+
+# Before core.db is imported: app_db drops every table, which must never hit the local data/local.db.
+os.environ["DB_PATH"] = os.path.join(tempfile.mkdtemp(prefix="mrx-test-"), "test.db")
+
 import pytest
 from core.db import create_db_engine
 from core.db import engine as global_engine
-from core.jobs import metadata
+from core.orm import metadata
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

@@ -1,50 +1,20 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from enum import Enum
 from typing import Dict, Any, Optional, List
 
 from core.db import engine
-from sqlalchemy import Table, Column, Integer, MetaData, String, JSON, Text, DateTime, Index, select, insert, update, \
-    RowMapping
+from core.orm import JobRow, JobStatus, JobType
+from sqlalchemy import select, insert, update, RowMapping
 from sqlalchemy.exc import IntegrityError
 
 
-class JobType(str, Enum):
-    TRAINING = "training"
-    BATCH = "batch"
-    LABELING = "labeling"
-
-class JobStatus(str, Enum):
-    QUEUED = "queued"
-    RUNNING = "running"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    CANCELED = "canceled"
-
-metadata = MetaData()
-
-jobs = Table(
-    "jobs",
-    metadata,
-    Column("id", Integer, primary_key=True),
-    Column("job_type", String(32), nullable=False),
-    Column("status", String(16), nullable=False),
-    Column("payload", JSON, nullable=False),
-    Column("result", JSON),
-    Column("error", Text),
-    Column("worker_id", String(64)),
-    Column("idempotency_key", String(128), unique=True),
-    Column("created_at", DateTime(timezone=True), nullable=False),
-    Column("updated_at", DateTime(timezone=True), nullable=False),
-    Column("started_at", DateTime(timezone=True)),
-    Column("finished_at", DateTime(timezone=True)),
-    Index("idx_jobs_dequeue", "job_type", "status", "created_at"),
-    sqlite_autoincrement=True,
-)
+# The queue stays on SQL statements: claiming and finishing a job rely on conditional UPDATEs.
+jobs = JobRow.__table__
 
 
 @dataclass(frozen=True)
 class Job:
+    """Read-only copy of a row, free of any session, for workers and the batch and labeling APIs."""
     id: int
     job_type: JobType
     status: JobStatus

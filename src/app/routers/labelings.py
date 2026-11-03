@@ -1,5 +1,6 @@
 from typing import Optional
 
+import visionops_labeling
 from core import jobs as job_repo
 from fastapi import APIRouter, Query, Path
 from app.schemas.labeling import LabelingCreate
@@ -33,3 +34,37 @@ def get_labeling_job(labeling_id: int = Path(ge=1)):
 @router.delete("/{labeling_id}", summary="Cancel queued labeling job")
 def cancel_labeling_job(labeling_id: int = Path(ge=1)):
     return labeling_service.cancel_labeling_job(labeling_id)
+
+@router.post("/test")
+def test():
+    from visionops_labeling.tasks import detect
+    from visionops_labeling.config import TtaConfig, RuleConfig
+    from visionops_labeling.stages import class_stages
+
+    setup = detect.SignalSetup(
+        task="detect",
+        enabled=True,
+        variants=detect.tta_variants(TtaConfig()),
+        match_iou=0.3,
+        conf_thresholds=conf,
+        rules=detect.rule_params(
+            conf,
+            tta_iou,
+            agree_iou,
+            class_stages(states, model_version, stage_cfg),
+            RuleConfig()),
+        distance=image_distance,
+        box=box_distance,
+        box_active=box_active,
+        stats_id=stats_id,
+        production=production_ref)
+
+    for item in detect.analyze(
+            predictor,
+            arrays,
+            {"conf": 0.05, "iou": 0.7, "max_det": 300},
+            cmap,
+            names,
+            setup,
+            production=production_predictor):
+        judgment = detect.judge(item["boxes"], item["signals"], setup.rules, f"{batch_id}:{sha256}")
