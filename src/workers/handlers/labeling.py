@@ -1,80 +1,99 @@
 from __future__ import annotations
 
-import json
 import logging
 import os
 from collections import Counter
 from functools import lru_cache
-from pathlib import Path
 from typing import Any, Dict, List, Mapping
 
+from core.boxes import xywhn
+from core.db import SessionLocal
 from core.jobs import Job
+from core.orm import LabelingImageRow, LabelingRow, ModelRow, Suggestion
+from sqlalchemy import update
 from workers.handlers.images import chunks, list_images, read_image
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_DIR = Path(os.environ.get("LABELING_OUTPUT_DIR", "./data/labeling_outputs"))
-
 CHUNK_SIZE = int(os.environ.get("LABELING_CHUNK_SIZE", "16"))
+
+APPROVE_CONF = float(os.environ.get("LABELING_APPROVE_CONF", "0.9"))
 
 HISTOGRAM_BINS = 10
 
 
 def handle_labeling_job(job: Job) -> Dict[str, Any]:
-    payload = job.payload
-    params = payload.get("params") or {}
+    labeling_id = job.payload["labeling_id"]
 
-    images = list_images(payload["input_path"])
+    with SessionLocal() as session:  # closed before the labeling: it can take hours
+        record = session.get(LabelingRow, labeling_id)
+        if record is None:
+            raise ValueError(f"labeling '{labeling_id}' not found")
+        model_row = session.get(ModelRow, record.model_id)
+        if model_row is None or not model_row.weights_path:
+            raise ValueError(f"model '{record.model_id}' has no weights")
+
+    params = record.params
+    images = list_images(record.source_path)
     if not images:
-        raise ValueError(f"no images found in {payload['input_path']}")
+        raise ValueError(f"no images found in {record.source_path}")
 
-    logger.info("labeling job %s: model=%s input=%s images=%d params=%s",
-                job.id, payload["model"], payload["input_path"], len(images), params)
+    logger.info("labeling %s: model=%s source=%s images=%d params=%s",
+                labeling_id, model_row.weights_path, record.source_path, len(images), params)
 
-    model = _load_model(payload["model"])
+    model = _load_model(model_row.weights_path)
     names = model.model.names
-
-    out_dir = OUTPUT_DIR / str(job.id)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "labels.jsonl"
-    tmp_path = out_path.with_suffix(".jsonl.part")
+    _save_start(labeling_id, len(images), names)
 
     summary = _Summary()
-    with tmp_path.open("w", encoding="utf-8") as f:
-        for chunk in chunks(images, CHUNK_SIZE):
-            paths, arrays = [], []
-            for path in chunk:
-                array = read_image(path)
-                if array is None:
-                    logger.warning("labeling job %s: cannot read %s", job.id, path)
-                    summary.unreadable += 1
-                    continue
-                paths.append(path)
-                arrays.append(array)
-
-            if not arrays:
+    done = 0
+    for chunk in chunks(images, CHUNK_SIZE):
+        paths, arrays = [], []
+        for path in chunk:
+            array = read_image(path)
+            if array is None:
+                logger.warning("labeling %s: cannot read %s", labeling_id, path)
+                summary.unreadable += 1
                 continue
+            paths.append(path)
+            arrays.append(array)
 
+        rows = []
+        if arrays:
             detections_per_image = model.predict(
                 arrays,
-                conf=params.get("conf", 0.25),
-                iou=params.get("iou", 0.7),
-                max_det=params.get("max_det", 300),
+                conf=params["conf"],
+                iou=params["iou"],
+                max_det=params["max_det"],
             )
-
             for path, array, detections in zip(paths, arrays, detections_per_image):
                 height, width = array.shape[:2]
-                record = _to_record(path, width, height, detections, names)
-                summary.add(record)
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                labels = _to_labels(width, height, detections, names)
+                summary.add(labels)
+                rows.append(LabelingImageRow(
+                    labeling_id=labeling_id,
+                    image_path=str(path),
+                    width=width,
+                    height=height,
+                    labels=labels,
+                    num_labels=len(labels),
+                    suggested=suggest(labels).value,
+                ))
+
+        done += len(chunk)
+        _save_chunk(labeling_id, rows, done)
 
     if summary.images == 0:
-        tmp_path.unlink(missing_ok=True)
-        raise ValueError(f"none of the {len(images)} images in {payload['input_path']} could be read")
+        raise ValueError(f"none of the {len(images)} images in {record.source_path} could be read")
 
-    tmp_path.replace(out_path)
+    return summary.to_dict()
 
-    return {"output_path": str(out_path), **summary.to_dict()}
+
+def suggest(labels: List[Dict[str, Any]]) -> Suggestion:
+    """The system's verdict. An image without labels may be a missed defect, so a person looks at it."""
+    if labels and all(label["confidence"] >= APPROVE_CONF for label in labels):
+        return Suggestion.APPROVED
+    return Suggestion.REVIEW
 
 
 @lru_cache(maxsize=2)
@@ -85,38 +104,38 @@ def _load_model(model: str):
     return YoloPredictor(model)
 
 
-def _to_record(
-        image_path: Path,
+def _save_start(labeling_id: int, total: int, names: Mapping[int, str]) -> None:
+    with SessionLocal() as session:
+        session.execute(
+            update(LabelingRow)
+            .where(LabelingRow.id == labeling_id)
+            .values(images_total=total, class_names={str(i): name for i, name in names.items()})
+        )
+        session.commit()
+
+
+def _save_chunk(labeling_id: int, rows: List[LabelingImageRow], done: int) -> None:
+    with SessionLocal() as session:
+        session.add_all(rows)
+        session.execute(update(LabelingRow).where(LabelingRow.id == labeling_id).values(images_done=done))
+        session.commit()
+
+
+def _to_labels(
         width: int,
         height: int,
         detections: List[Dict[str, Any]],
         names: Mapping[int, str],
-) -> Dict[str, Any]:
-    return {
-        "image": str(image_path),
-        "width": width,
-        "height": height,
-        "labels": [
-            {
-                "class_id": d["class_id"],
-                "class_name": names[d["class_id"]],
-                "confidence": round(d["confidence"], 4),
-                "bbox_xyxy": [round(v, 2) for v in d["xyxy"]],
-                "bbox_xywhn": _xywhn(d["xyxy"], width, height),
-            }
-            for d in detections
-        ],
-    }
-
-
-def _xywhn(xyxy: List[float], width: int, height: int) -> List[float]:
-    """Box as normalized center x, center y, width, height (YOLO label format)."""
-    x1, y1, x2, y2 = xyxy
+) -> List[Dict[str, Any]]:
     return [
-        round((x1 + x2) / 2 / width, 6),
-        round((y1 + y2) / 2 / height, 6),
-        round((x2 - x1) / width, 6),
-        round((y2 - y1) / height, 6),
+        {
+            "class_id": d["class_id"],
+            "class_name": names[d["class_id"]],
+            "confidence": round(d["confidence"], 4),
+            "bbox_xyxy": [round(v, 2) for v in d["xyxy"]],
+            "bbox_xywhn": xywhn(d["xyxy"], width, height),
+        }
+        for d in detections
     ]
 
 
@@ -129,9 +148,8 @@ class _Summary:
         self.class_counts: Counter = Counter()
         self.histogram = [0] * HISTOGRAM_BINS
 
-    def add(self, record: Dict[str, Any]) -> None:
+    def add(self, labels: List[Dict[str, Any]]) -> None:
         self.images += 1
-        labels = record["labels"]
         if not labels:
             self.images_without_labels += 1
         for label in labels:

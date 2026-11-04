@@ -21,6 +21,7 @@ class ModelRow(Base):
     __table_args__ = (
         UniqueConstraint("model_name", "model_version", name="uq_models_name_version"),
         Index("uq_models_init_training", "init_training_id", unique=True),
+        Index("uq_models_training", "training_id", unique=True),
         {"sqlite_autoincrement": True},
     )
 

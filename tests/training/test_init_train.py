@@ -148,7 +148,13 @@ def fake_yolo(monkeypatch):
         def train(self, **kwargs):
             calls.update(kwargs)
             for epoch in (0, 1, 2, 3):  # 3: the extra call of the final evaluation
-                self.callbacks["on_fit_epoch_end"](types.SimpleNamespace(epoch=epoch, epochs=kwargs["epochs"]))
+                self.callbacks["on_fit_epoch_end"](types.SimpleNamespace(
+                    epoch=epoch,
+                    epochs=kwargs["epochs"],
+                    metrics={"metrics/mAP50(B)": 0.5, "val/box_loss": 1.2},
+                    tloss=None,
+                    label_loss_items=lambda _, prefix: {f"{prefix}/box_loss": 1.5},
+                ))
             return Results(f"{kwargs['project']}/{kwargs['name']}")
 
     ultralytics = types.ModuleType("ultralytics")
@@ -189,7 +195,10 @@ def test_run_trains_with_the_requested_settings(folders, tmp_path, fake_yolo, ca
         "weights_path": str(output.resolve() / "weights" / "best.pt"),
     }
     progress = [line for line in capsys.readouterr().out.splitlines() if line.startswith("MRX_PROGRESS")]
-    assert [json.loads(line.split(" ", 1)[1])["epochs_done"] for line in progress] == [1, 2, 3, 3]
+    messages = [json.loads(line.split(" ", 1)[1]) for line in progress]
+    assert [m["epochs_done"] for m in messages] == [1, 2, 3, 3]
+    assert messages[0]["metrics"] == {"val/mAP50": 0.5, "val/box_loss": 1.2, "train/box_loss": 1.5}
+    assert "metrics" not in messages[3]  # the extra call of the final evaluation
 
 
 def test_run_stops_before_training_on_bad_labels(folders, tmp_path, fake_yolo):

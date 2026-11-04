@@ -14,7 +14,7 @@ jobs = JobRow.__table__
 
 @dataclass(frozen=True)
 class Job:
-    """Read-only copy of a row, free of any session, for workers and the batch and labeling APIs."""
+    """Read-only copy of a row, free of any session."""
     id: int
     job_type: JobType
     status: JobStatus

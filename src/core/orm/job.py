@@ -9,7 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 class JobType(str, Enum):
     TRAINING = "training"
-    BATCH = "batch"
     LABELING = "labeling"
     MODEL_EXPORT = "model_export"
     INIT_TRAINING = "init_training"

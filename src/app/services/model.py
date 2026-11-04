@@ -5,12 +5,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from uuid import uuid4
 
-from app.problems import conflict, not_found, not_implemented
+from app.problems import conflict, not_found
 from app.schemas.model import ModelApply, ModelCreate, ModelExportRequest, ModelMetadata
 from app.services import init_training as init_training_service
+from app.services import training as training_service
 from core import jobs as job_repo
 from core.jobs import Job, JobType, jobs
-from core.orm import JobStatus, ModelRow, ModelType
+from core.orm import JobRow, JobStatus, LabelingRow, ModelRow, ModelType
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -23,26 +24,22 @@ ModelWithExports = Tuple[ModelRow, List[Job]]
 
 
 def create_model(session: Session, body: ModelCreate) -> ModelWithExports:
-    if body.training_id is not None:
-        # TODO: register from the succeeded training once the trainings API exists.
-        raise not_implemented("registering from a retraining needs the trainings API")
-    if body.type == ModelType.LINE:
-        return _register_line_model(session, body)
-    return _store_model(session, body, Path(body.weights_path))
+    if body.type == ModelType.INIT:
+        return _store_model(session, body, Path(body.weights_path))
+    if body.init_training_id is not None:
+        return _register_from_init_training(session, body)
+    return _register_from_training(session, body)
 
 
-def _register_line_model(session: Session, body: ModelCreate) -> ModelWithExports:
+def _register_from_init_training(session: Session, body: ModelCreate) -> ModelWithExports:
     init_training_id = body.init_training_id
     training = init_training_service.get_init_training(session, init_training_id)
+    source = f"init training '{init_training_id}'"
 
-    if training.job.status != JobStatus.SUCCEEDED.value:
-        raise conflict(f"init training '{init_training_id}' is '{training.job.status}', not 'succeeded'")
+    _check_succeeded(training.job, source)
     if _find_by_init_training(session, init_training_id):
-        raise _already_registered(init_training_id)
-
-    start_task = session.get(ModelRow, training.model_id).task
-    if body.metadata.task != start_task:
-        raise conflict(f"task '{body.metadata.task}' does not match the init training's task '{start_task}'")
+        raise _already_registered(source)
+    _check_task(body, session.get(ModelRow, training.model_id).task, source)
 
     result = training.job.result
     return _store_model(
@@ -52,6 +49,37 @@ def _register_line_model(session: Session, body: ModelCreate) -> ModelWithExport
         init_training_id=init_training_id,
         metrics=result["metrics"],
     )
+
+
+def _register_from_training(session: Session, body: ModelCreate) -> ModelWithExports:
+    training_id = body.training_id
+    training = training_service.get_training(session, training_id)
+    source = f"training '{training_id}'"
+
+    _check_succeeded(training.job, source)
+    if _find_by_training(session, training_id):
+        raise _already_registered(source)
+    labeling = session.get(LabelingRow, training.labeling_ids[0])
+    _check_task(body, session.get(ModelRow, labeling.model_id).task, source)
+
+    result = training.job.result
+    return _store_model(
+        session,
+        body,
+        Path(result["weights_path"]),
+        training_id=training_id,
+        metrics=result["metrics"],
+    )
+
+
+def _check_succeeded(job: JobRow, source: str) -> None:
+    if job.status != JobStatus.SUCCEEDED.value:
+        raise conflict(f"{source} is '{job.status}', not 'succeeded'")
+
+
+def _check_task(body: ModelCreate, task: str, source: str) -> None:
+    if body.metadata.task != task:
+        raise conflict(f"task '{body.metadata.task}' does not match the task '{task}' of {source}")
 
 
 def _store_model(session: Session, body: ModelCreate, source: Path, **origin: Any) -> ModelWithExports:
@@ -84,9 +112,11 @@ def _store_model(session: Session, body: ModelCreate, source: Path, **origin: An
         session.commit()
     except IntegrityError:
         session.rollback()
-        init_training_id = origin.get("init_training_id")
+        init_training_id, training_id = origin.get("init_training_id"), origin.get("training_id")
         if init_training_id is not None and _find_by_init_training(session, init_training_id):
-            raise _already_registered(init_training_id) from None
+            raise _already_registered(f"init training '{init_training_id}'") from None
+        if training_id is not None and _find_by_training(session, training_id):
+            raise _already_registered(f"training '{training_id}'") from None
         raise _duplicate(meta) from None
     finally:
         partial.unlink(missing_ok=True)
@@ -104,8 +134,12 @@ def _find_by_init_training(session: Session, init_training_id: int) -> Optional[
     return session.scalar(select(ModelRow).where(ModelRow.init_training_id == init_training_id))
 
 
-def _already_registered(init_training_id: int):
-    return conflict(f"init training '{init_training_id}' is already registered as a model")
+def _find_by_training(session: Session, training_id: int) -> Optional[ModelRow]:
+    return session.scalar(select(ModelRow).where(ModelRow.training_id == training_id))
+
+
+def _already_registered(source: str):
+    return conflict(f"{source} is already registered as a model")
 
 
 def _duplicate(meta: ModelMetadata):

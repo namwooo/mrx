@@ -22,7 +22,6 @@ router = APIRouter(
     status_code=201,
     response_model=Model,
     response_model_exclude_none=True,
-    responses={501: {"model": Problem, "description": "Registering from a retraining is not supported yet"}},
 )
 def create_model(body: ModelCreate, session: Session = Depends(get_session)):
     return Model.from_row(*model_service.create_model(session, body))

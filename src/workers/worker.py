@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import threading
 from typing import Callable, Dict, Optional, Any
 
 from core.jobs import JobType, claim_next_job, fail_job, complete_job
@@ -29,6 +30,11 @@ class Worker:
         self.handler = handler
         self.worker_id = worker_id  or default_worker_id()
         self.poll_interval = poll_interval
+        self._stop_requested = threading.Event()
+
+    @property
+    def stopping(self) -> bool:
+        return self._stop_requested.is_set()
 
     def run_once(self):
         job = claim_next_job(self.job_type, self.worker_id)
@@ -44,6 +50,11 @@ class Worker:
             logger.exception("job %s failed", job_id)
             fail_job(job_id, self.worker_id, f"{type(exc).__name__}: {exc}")
             return True
+        except BaseException:
+            # Forced to stop: without this the job would stay 'running' forever.
+            logger.warning("job %s stopped before it finished", job_id)
+            fail_job(job_id, self.worker_id, "worker stopped before the job finished")
+            raise
 
         try:
             done = complete_job(job_id, self.worker_id, result)
@@ -58,8 +69,19 @@ class Worker:
             logger.warning("job %s could not be completed", job_id)
         return True
 
-    def run_forever(self):
-        pass
+    def run_forever(self) -> None:
+        logger.info("worker %s waits for %s jobs", self.worker_id, self.job_type.value)
+        while not self.stopping:
+            try:
+                worked = self.run_once()
+            except Exception:  # the database can be briefly busy: that must not end the worker
+                logger.exception("worker %s could not fetch a job", self.worker_id)
+                worked = False
 
-    def stop(self):
-        pass
+            if not worked:
+                self._stop_requested.wait(self.poll_interval)
+        logger.info("worker %s stopped", self.worker_id)
+
+    def stop(self) -> None:
+        """Ends run_forever once the current job is done."""
+        self._stop_requested.set()

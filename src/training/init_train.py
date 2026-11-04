@@ -75,7 +75,13 @@ def prepare_dataset(image_dir: Path, label_dir: Path, names: Dict[int, str], roo
 
 def report_epoch(trainer: Any) -> None:
     # Fires once more for the final evaluation, with the epoch already past the last one.
-    report("PROGRESS", {"epochs_done": min(trainer.epoch + 1, trainer.epochs)})
+    if trainer.epoch >= trainer.epochs:
+        report("PROGRESS", {"epochs_done": trainer.epochs})
+        return
+
+    values = {**trainer.metrics, **trainer.label_loss_items(trainer.tloss, prefix="train")}
+    metrics = {f"val/{METRIC_NAMES[k]}" if k in METRIC_NAMES else k: float(v) for k, v in values.items()}
+    report("PROGRESS", {"epochs_done": trainer.epoch + 1, "metrics": metrics})
 
 
 def train(request: Dict[str, Any], data_yaml: Path, output_dir: Path) -> Dict[str, Any]:

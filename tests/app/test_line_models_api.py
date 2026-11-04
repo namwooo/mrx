@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.services import model as model_service
 from core.db import SessionLocal
 from core.jobs import JobType
-from core.orm import InitTrainingRow, JobRow, JobStatus, ModelRow, ModelType
+from core.orm import InitTrainingRow, JobRow, JobStatus, LabelingRow, ModelRow, ModelType, TrainingRow
 
 BASE = "/v1/registry/models"
 TRAINED = b"trained-weights"
@@ -184,3 +184,76 @@ def test_init_models_stay_free_of_the_one_model_rule(client, tmp_path):
             "weights_path": str(weights),
         }
         assert client.post(BASE, json=body).status_code == 201
+
+
+def _training(best_pt, status=JobStatus.SUCCEEDED, task="detection"):
+    now = datetime.now(timezone.utc)
+    start = ModelRow(type=ModelType.LINE.value, model_name=f"used-{now.timestamp()}", model_version="1", task=task,
+                     line="LINE3")
+    with SessionLocal() as session:
+        session.add(start)
+        session.flush()
+        labeling = LabelingRow(
+            job=JobRow(job_type=JobType.LABELING.value, status="succeeded", payload={}, created_at=now, updated_at=now),
+            model_id=start.id, source_path="/data", params={},
+        )
+        session.add(labeling)
+        session.flush()
+        record = TrainingRow(
+            job=JobRow(job_type=JobType.TRAINING.value, status=status.value, payload={},
+                       result={"metrics": METRICS, "weights_path": str(best_pt)} if status == JobStatus.SUCCEEDED else None,
+                       created_at=now, updated_at=now),
+            base_model_id=start.id, labeling_ids=[labeling.id], split={}, params={"epochs": 1}, output_dir="/runs",
+        )
+        session.add(record)
+        session.commit()
+    return record.id
+
+
+def _body_from_training(training_id, **metadata):
+    return {"type": "line", "metadata": {**METADATA, **metadata}, "training_id": training_id}
+
+
+def test_register_from_a_succeeded_training(client, best_pt, tmp_path):
+    training_id = _training(best_pt)
+
+    res = client.post(BASE, json=_body_from_training(training_id))
+
+    assert res.status_code == 201, res.text
+    model = res.json()
+    assert model["training_id"] == training_id
+    assert model["metrics"] == METRICS
+    assert (tmp_path / "registry" / "defect-detector" / "1.0.0" / "best.pt").read_bytes() == TRAINED
+
+
+@pytest.mark.parametrize("status", [JobStatus.QUEUED, JobStatus.RUNNING, JobStatus.FAILED, JobStatus.CANCELED])
+def test_unfinished_training_returns_409(client, best_pt, status):
+    _assert_problem(client.post(BASE, json=_body_from_training(_training(best_pt, status))), 409, "conflict")
+
+
+def test_same_training_cannot_be_registered_twice(client, best_pt):
+    training_id = _training(best_pt)
+    client.post(BASE, json=_body_from_training(training_id))
+
+    res = client.post(BASE, json=_body_from_training(training_id, model_version="2.0.0"))
+
+    _assert_problem(res, 409, "conflict")
+    assert "already registered" in res.json()["detail"]
+
+
+def test_losing_a_race_for_the_same_training_returns_409(client, best_pt, monkeypatch):
+    training_id = _training(best_pt)
+    client.post(BASE, json=_body_from_training(training_id))
+    checks = iter([None])
+    real = model_service._find_by_training
+    monkeypatch.setattr(model_service, "_find_by_training", lambda *a: next(checks, real(*a)))
+
+    res = client.post(BASE, json=_body_from_training(training_id, model_version="2.0.0"))
+
+    _assert_problem(res, 409, "conflict")
+    assert "already registered" in res.json()["detail"]
+
+
+def test_task_must_match_the_labeling_model(client, best_pt):
+    res = client.post(BASE, json=_body_from_training(_training(best_pt), task="classification"))
+    _assert_problem(res, 409, "conflict")

@@ -1,4 +1,4 @@
-# Demo image: API server + batch worker in one container (cloud with internet access, CPU only).
+# Demo image: API server + job workers in one container (cloud with internet access, CPU only).
 #
 # Build and run from the project root:
 #     docker compose up -d --build
@@ -59,9 +59,9 @@ RUN useradd --uid 1000 --create-home app && mkdir -p /data && chown app:app /dat
 USER app
 
 ENV DB_PATH=/data/local.db \
-    BATCH_OUTPUT_DIR=/data/batch_outputs \
     REGISTRY_DIR=/data/registry \
     INIT_TRAINING_DIR=/data/init_trainings \
+    TRAINING_DIR=/data/trainings \
     INFERENCE_DEVICE=cpu \
     YOLO_CONFIG_DIR=/tmp/Ultralytics \
     PORT=8000

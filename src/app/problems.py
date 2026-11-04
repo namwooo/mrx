@@ -28,6 +28,10 @@ class ProblemError(Exception):
         self.detail = detail
 
 
+def bad_request(detail: str) -> ProblemError:
+    return ProblemError(400, "invalid-request", "요청 형식 오류", detail)
+
+
 def not_found(detail: str) -> ProblemError:
     return ProblemError(404, "not-found", "리소스가 없음", detail)
 
@@ -36,8 +40,8 @@ def conflict(detail: str) -> ProblemError:
     return ProblemError(409, "conflict", "요청 충돌", detail)
 
 
-def not_implemented(detail: str) -> ProblemError:
-    return ProblemError(501, "not-implemented", "아직 지원하지 않음", detail)
+def already_finished(detail: str) -> ProblemError:
+    return ProblemError(409, "conflict", "이미 끝난 작업", detail)
 
 
 def _response(request: Request, status: int, code: str, title: str, detail: str) -> JSONResponse:

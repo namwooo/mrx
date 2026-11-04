@@ -49,14 +49,14 @@ def _create(client, weights, **metadata):
     return res.json()
 
 
-def _line_model(name="line-model", line="LINE3", task="detection"):
+def _line_model(name="line-model", line="LINE3", task="detection", training_id=None):
     model = ModelRow(
         type=ModelType.LINE.value,
         model_name=name,
         model_version=str(next(versions)),
         task=task,
         line=line,
-        training_id=7,
+        training_id=training_id,
         dataset_id=8,
         metrics={"mAP50": 0.742},
     )
@@ -182,9 +182,9 @@ def test_same_name_with_new_version_is_allowed(client, weights):
     assert _create(client, weights, model_version="1.5.0")["metadata"]["model_version"] == "1.5.0"
 
 
-def test_register_from_a_retraining_is_not_supported_yet(client):
-    body = {"type": "line", "metadata": {**METADATA, "line": "LINE3"}, "training_id": 1}
-    _assert_problem(client.post(BASE, json=body), 501, "not-implemented")
+def test_register_from_a_missing_retraining_returns_404(client):
+    body = {"type": "line", "metadata": {**METADATA, "line": "LINE3"}, "training_id": 99999}
+    _assert_problem(client.post(BASE, json=body), 404, "not-found")
 
 
 def test_get_model(client, weights):
@@ -193,7 +193,7 @@ def test_get_model(client, weights):
 
 
 def test_get_line_model_shows_its_sources(client):
-    record = _line_model()
+    record = _line_model(training_id=7)
     model = client.get(f"{BASE}/{record.id}").json()
 
     assert model["training_id"] == 7
