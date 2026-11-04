@@ -18,16 +18,32 @@ LOW = {"class_id": 1, "confidence": 0.42, "xyxy": [100.0, 0.0, 200.0, 100.0]}
 
 
 class FakeModel:
-    """Stands in for inference.yolo.YoloPredictor: same predict()/model.names surface."""
+    """Stands in for inference.yolo.YoloPredictor: same predict()/model.names surface.
+    By default it finds the same boxes on the TTA variants, and `variants_by_width` overrides what they find."""
 
     def __init__(self, detections_by_width):
         self.detections_by_width = detections_by_width
+        self.variants_by_width = {}
         self.model = type("Inner", (), {"names": {0: "scratch", 1: "dent"}})()
         self.calls = []
 
-    def predict(self, images, *, conf, iou, max_det):
-        self.calls.append({"n": len(images), "conf": conf, "iou": iou, "max_det": max_det})
-        return [self.detections_by_width.get(img.shape[1], []) for img in images]
+    def predict(self, images, *, conf, iou, max_det, classes=None, imgsz=640):
+        self.calls.append({"n": len(images), "conf": conf, "iou": iou, "max_det": max_det,
+                           "classes": classes, "imgsz": imgsz})
+        return [self._detect(image, imgsz) for image in images]
+
+    def _detect(self, image, imgsz):
+        width = image.shape[1]
+        flipped = image[0, 0, 0] == 0  # read_image marks the left column
+        if not flipped and imgsz == 640:
+            return self.detections_by_width.get(width, [])
+        found = self.variants_by_width.get(width, self.detections_by_width.get(width, []))
+        return [_mirrored(d, width) for d in found] if flipped else found
+
+
+def _mirrored(detection, width):
+    x1, y1, x2, y2 = detection["xyxy"]
+    return {**detection, "xyxy": [width - x2, y1, width - x1, y2]}
 
 
 @pytest.fixture
@@ -46,11 +62,16 @@ def fake(monkeypatch):
 
     def read_image(path):
         size = sizes.get(path.name)
-        return None if size is None else np.zeros((*size, 3), dtype=np.uint8)
+        if size is None:
+            return None
+        image = np.zeros((*size, 3), dtype=np.uint8)
+        image[:, 0] = 255
+        return image
 
     model = FakeModel({200: [HIGH], 300: [HIGH, LOW], 400: [LOW]})
     monkeypatch.setattr(labeling, "read_image", read_image)
     monkeypatch.setattr(labeling, "_load_model", lambda path: model)
+    monkeypatch.setattr(labeling, "AUDIT_RATE", 0.0)
     return model
 
 
@@ -128,11 +149,94 @@ def test_suggestion_needs_every_box_confident(app_db, source, fake):
     assert images["empty.png"].suggested == "review"  # no labels: possibly a missed defect
 
 
-def test_approve_threshold_is_inclusive(monkeypatch):
-    monkeypatch.setattr(labeling, "APPROVE_CONF", 0.9)
-    assert labeling.suggest([{"confidence": 0.9}]).value == "approved"
-    assert labeling.suggest([{"confidence": 0.8999}]).value == "review"
-    assert labeling.suggest([]).value == "review"
+@pytest.mark.parametrize("confidence, suggested", [(0.9, "approved"), (0.8999, "review")])
+def test_approve_threshold_is_inclusive(app_db, source, fake, confidence, suggested):
+    fake.detections_by_width[200] = [{**HIGH, "confidence": confidence}]
+    record = _labeling(source)
+    _run()
+
+    assert _images(record)["a.jpg"].suggested == suggested
+
+
+def test_every_image_also_runs_through_the_tta_variants(app_db, source, fake):
+    _labeling(source)
+    _run()
+
+    assert [call["imgsz"] for call in fake.calls] == [640, 640, 512]
+    assert {tuple(call["classes"]) for call in fake.calls} == {(0, 1)}
+
+
+def test_confident_box_that_vanishes_on_a_variant_goes_to_review(app_db, source, fake):
+    fake.variants_by_width[200] = []
+    record = _labeling(source)
+    _run()
+
+    image = _images(record)["a.jpg"]
+
+    assert image.suggested == "review"
+    assert image.predictions["judgment"]["gate"] == ["tta_missing"]
+
+
+def test_confident_box_that_moves_on_a_variant_goes_to_review(app_db, source, fake):
+    fake.variants_by_width[200] = [{**HIGH, "xyxy": [34.0, 10.0, 74.0, 50.0]}]  # IoU 0.48: same object, unstable box
+    record = _labeling(source)
+    _run()
+
+    image = _images(record)["a.jpg"]
+
+    assert image.suggested == "review"
+    assert image.predictions["judgment"]["boxes"][0]["reasons"] == ["tta_iou"]
+
+
+def test_confident_box_found_only_on_a_variant_goes_to_review(app_db, source, fake):
+    missed = {"class_id": 1, "confidence": 0.95, "xyxy": [120.0, 60.0, 160.0, 90.0]}
+    fake.variants_by_width[200] = [HIGH, missed]
+    record = _labeling(source)
+    _run()
+
+    image = _images(record)["a.jpg"]
+
+    assert image.suggested == "review"
+    assert image.predictions["judgment"]["gate"] == ["tta_extra"]
+
+
+def test_audit_sample_goes_to_review_though_the_rules_approved_it(app_db, source, fake, monkeypatch):
+    monkeypatch.setattr(labeling, "AUDIT_RATE", 1.0)
+    record = _labeling(source)
+    _run()
+
+    image = _images(record)["a.jpg"]
+
+    assert image.suggested == "review"
+    assert image.predictions["judgment"]["decision"] == "AUTO_APPROVED"
+    assert image.predictions["judgment"]["audit"] is True
+
+
+def test_held_box_is_kept_in_predictions_but_is_no_label(app_db, source, fake):
+    weak = {"class_id": 1, "confidence": 0.06, "xyxy": [120.0, 60.0, 160.0, 90.0]}
+    fake.detections_by_width[200] = [HIGH, weak]
+    fake.variants_by_width[200] = [HIGH]
+    record = _labeling(source, {**PARAMS, "conf": 0.05})
+    _run()
+
+    image = _images(record)["a.jpg"]
+
+    assert [label["class_name"] for label in image.labels] == ["scratch"]
+    assert image.num_labels == 1
+    assert image.suggested == "approved"
+    assert image.predictions["judgment"]["held"] == 1
+    assert len(image.predictions["boxes"]) == 2
+
+
+def test_predictions_keep_what_the_verdict_was_based_on(app_db, source, fake):
+    record = _labeling(source)
+    _run()
+
+    predictions = _images(record)["b.png"].predictions
+
+    assert [box["confidence"] for box in predictions["boxes"]] == [0.95, 0.42]
+    assert [box["conf_threshold"] for box in predictions["signals"]["boxes"]] == [0.9, 0.9]
+    assert predictions["judgment"]["boxes"][1] == {"verdict": "review", "reasons": ["confidence"]}
 
 
 def test_summary_is_the_job_result(app_db, source, fake):

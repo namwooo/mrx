@@ -33,13 +33,13 @@ class YoloPredictor(Predictor):
             iou: float = 0.7,
             max_det: int = 300,
             classes = None,
-            image_size= INPUT_SIZE,
+            imgsz=INPUT_SIZE,
     ) -> list[ImageDetections]:
-        options = dict(conf=conf, iou=iou, max_det=max_det, classes=classes, image_size=image_size)
+        options = dict(conf=conf, iou=iou, max_det=max_det, classes=classes, imgsz=imgsz)
 
         if self.feature_extractor is None:
             results = self._run(images, **options)
-        elif image_size == INPUT_SIZE:
+        elif imgsz == INPUT_SIZE:
             with self.feature_extractor.capture(images):
                 results = self._run(images, **options)
         else:
@@ -56,13 +56,13 @@ class YoloPredictor(Predictor):
             iou: float,
             max_det: int,
             classes: list[int] | None,
-            image_size: int
+            imgsz: int
     ) -> list[Any]:
         return list(self.model.predict(
             source=images,
             conf=conf,
             iou=iou,
-            imgsz=image_size,
+            imgsz=imgsz,
             rect=False,
             max_det=max_det,
             classes=classes,

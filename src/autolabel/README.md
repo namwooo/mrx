@@ -1,7 +1,7 @@
 # autolabel
 
 검사 모델 자동라벨링의 **판정 신호 · 판정 규칙 · 거리 통계 · 평가 · 임계값 보정**을 담은 라이브러리다.
-서버(`app.labeling`)에서 계산 부분만 떼어 냈다. 서버 구조를 바꾸거나 새로 짜도 이 라이브러리를 그대로 가져다 쓰고,
+서버(`workers.handlers.labeling`)는 계산을 이 라이브러리에 맡긴다. 서버 구조를 바꾸거나 새로 짜도 이 라이브러리를 그대로 가져다 쓰고,
 결과가 같은지는 시험으로 확인한다.
 
 - **다루지 않는 것:** DB, HTTP, 작업 큐, 파일 저장 위치, 환경 변수. 이것들은 서버의 몫이다.
@@ -49,8 +49,8 @@ for item in detect.analyze(predictor, arrays, {"conf": 0.05, "iou": 0.7, "max_de
 평가셋 평가는 `tasks.detect.evaluation.evaluate_image` 가 이미지마다 평가 행·이미지 정보·클래스별 정답/맞은 수를 만든다.
 그 결과를 `summarize`(AUROC) · `decide`(④ B단계) · `calibrate`(임계값 보정)에 넘긴다.
 
-지금 서버에서는 `app.labeling.autolabel.SignalContext` 가 `SignalSetup` 을 상속한다. DB 의 신호 상태·거리 통계·단계를 읽어
-위 인자를 채운다. `app.labeling.*` 의 신호·규칙·기하·특징 모듈은 이 라이브러리를 다시 내보내기만 한다(예전 import 경로 호환).
+지금 서버에서는 `workers.handlers.labeling` 이 `SignalSetup` 을 만든다. 신호 상태·거리 통계를 저장하지 않아 ①② 만 쓰고,
+모든 클래스를 같은 임계값으로 연다(`stages` 없이 `rule_params` 호출). ③④⑤ 와 클래스별 단계는 서버에 보정·통계가 생기면 켠다.
 
 ## 분류 (참조 구현)
 

@@ -55,3 +55,4 @@ class LabelingImageRow(Base):
     result: Mapped[Optional[str]] = mapped_column(String(16))
     reviewed_labels: Mapped[Optional[List[Dict[str, Any]]]] = mapped_column(JSON(none_as_null=True))
     reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    predictions: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON(none_as_null=True))

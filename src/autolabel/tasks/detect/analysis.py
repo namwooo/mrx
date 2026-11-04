@@ -2,7 +2,7 @@
 
 서버의 자동라벨링(AUTO_LABEL)·평가(LABEL_EVAL)·통계(LABEL_STATS)가 같은 analyze 를 쓰므로 같은 조건으로 점수가 계산된다.
 판정 조건(TTA 변형·클래스별 임계값·거리 통계·④ B단계 상태·⑤ 운영 모델)은 SignalSetup 에 담아 넘긴다.
-서버는 DB 의 신호 상태·통계로 SignalSetup 을 만든다(app.labeling.autolabel.SignalContext).
+서버는 workers.handlers.labeling 에서 SignalSetup 을 만든다.
 
 박스 dict 형식
     detect  class_id, class_name, confidence, bbox{x1,y1,x2,y2 원본 픽셀}, bbox_yolo[cx,cy,w,h 0~1]

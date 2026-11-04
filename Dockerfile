@@ -29,7 +29,7 @@ RUN pip install --index-url https://download.pytorch.org/whl/cpu torch torchvisi
 COPY requirements-app.txt .
 RUN pip install -r requirements-app.txt \
     # Fail the build here, not at the first job, if something the API or the worker needs is missing.
-    && python -c "import fastapi, uvicorn, sqlalchemy, alembic, ultralytics, cv2, torch; print('torch', torch.__version__)"
+    && python -c "import fastapi, uvicorn, sqlalchemy, alembic, ultralytics, cv2, scipy, torch; print('torch', torch.__version__)"
 
 # Demo model weights (YOLO11n, matches inference.yolo.DEFAULT_NECK_LAYERS).
 # Files downloaded with ADD are readable only by root by default, hence --chmod.

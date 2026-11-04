@@ -6,7 +6,9 @@ from collections import Counter
 from functools import lru_cache
 from typing import Any, Dict, List, Mapping
 
-from core.boxes import xywhn
+from autolabel.config import RuleConfig, TtaConfig
+from autolabel.constants import AUTO_APPROVED
+from autolabel.tasks import detect
 from core.db import SessionLocal
 from core.jobs import Job
 from core.orm import LabelingImageRow, LabelingRow, ModelRow, Suggestion
@@ -18,6 +20,10 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = int(os.environ.get("LABELING_CHUNK_SIZE", "16"))
 
 APPROVE_CONF = float(os.environ.get("LABELING_APPROVE_CONF", "0.9"))
+
+TTA_IOU = float(os.environ.get("LABELING_TTA_IOU", "0.5"))
+
+AUDIT_RATE = float(os.environ.get("LABELING_AUDIT_RATE", "0.05"))
 
 HISTOGRAM_BINS = 10
 
@@ -42,8 +48,12 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
                 labeling_id, model_row.weights_path, record.source_path, len(images), params)
 
     model = _load_model(model_row.weights_path)
-    names = model.model.names
-    _save_start(labeling_id, len(images), names)
+    class_names = model.model.names
+    _save_start(labeling_id, len(images), class_names)
+
+    names = [class_names[i] for i in range(len(class_names))]
+    class_map = {i: i for i in range(len(names))}
+    setup = _signal_setup(class_map)
 
     summary = _Summary()
     done = 0
@@ -60,15 +70,11 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
 
         rows = []
         if arrays:
-            detections_per_image = model.predict(
-                arrays,
-                conf=params["conf"],
-                iou=params["iou"],
-                max_det=params["max_det"],
-            )
-            for path, array, detections in zip(paths, arrays, detections_per_image):
+            analyzed = detect.analyze(model, arrays, params, class_map, names, setup)
+            for path, array, item in zip(paths, arrays, analyzed):
                 height, width = array.shape[:2]
-                labels = _to_labels(width, height, detections, names)
+                judgment = detect.judge(item["boxes"], item["signals"], setup.rules, f"{labeling_id}:{path}")
+                labels = _to_labels(item["boxes"], judgment)
                 summary.add(labels)
                 rows.append(LabelingImageRow(
                     labeling_id=labeling_id,
@@ -77,7 +83,8 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
                     height=height,
                     labels=labels,
                     num_labels=len(labels),
-                    suggested=suggest(labels).value,
+                    suggested=_suggestion(judgment).value,
+                    predictions={"boxes": item["boxes"], "signals": item["signals"], "judgment": judgment},
                 ))
 
         done += len(chunk)
@@ -89,9 +96,25 @@ def handle_labeling_job(job: Job) -> Dict[str, Any]:
     return summary.to_dict()
 
 
-def suggest(labels: List[Dict[str, Any]]) -> Suggestion:
-    """The system's verdict. An image without labels may be a missed defect, so a person looks at it."""
-    if labels and all(label["confidence"] >= APPROVE_CONF for label in labels):
+def _signal_setup(class_map: Mapping[int, int]) -> detect.SignalSetup:
+    """Confidence and TTA only, with one threshold for every class.
+    The other signals and per-class calibration need statistics this server does not keep yet."""
+    tta = TtaConfig()
+    conf = {class_id: APPROVE_CONF for class_id in class_map.values()}
+    tta_iou = {class_id: TTA_IOU for class_id in class_map.values()}
+    return detect.SignalSetup(
+        task="detect",
+        enabled=True,
+        variants=detect.tta_variants(tta),
+        match_iou=tta.match_iou,
+        conf_thresholds=conf,
+        rules=detect.rule_params(conf, tta_iou, {}, {}, RuleConfig(audit_rate=AUDIT_RATE)),
+    )
+
+
+def _suggestion(judgment: Dict[str, Any]) -> Suggestion:
+    """Images picked for the audit sample go to a person even though the rules approved them."""
+    if judgment["decision"] == AUTO_APPROVED and not judgment["audit"]:
         return Suggestion.APPROVED
     return Suggestion.REVIEW
 
@@ -121,21 +144,18 @@ def _save_chunk(labeling_id: int, rows: List[LabelingImageRow], done: int) -> No
         session.commit()
 
 
-def _to_labels(
-        width: int,
-        height: int,
-        detections: List[Dict[str, Any]],
-        names: Mapping[int, str],
-) -> List[Dict[str, Any]]:
+def _to_labels(boxes: List[Dict[str, Any]], judgment: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Held boxes stay in predictions but never become labels."""
     return [
         {
-            "class_id": d["class_id"],
-            "class_name": names[d["class_id"]],
-            "confidence": round(d["confidence"], 4),
-            "bbox_xyxy": [round(v, 2) for v in d["xyxy"]],
-            "bbox_xywhn": xywhn(d["xyxy"], width, height),
+            "class_id": box["class_id"],
+            "class_name": box["class_name"],
+            "confidence": round(box["confidence"], 4),
+            "bbox_xyxy": [box["bbox"][key] for key in ("x1", "y1", "x2", "y2")],
+            "bbox_xywhn": box["bbox_yolo"],
         }
-        for d in detections
+        for box, verdict in zip(boxes, judgment["boxes"])
+        if verdict["verdict"] != "hold"
     ]
 
 

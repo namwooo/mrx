@@ -1,6 +1,6 @@
 """라이브러리 공통 상수: 모델 입력 크기, 작업 종류, 판정 신호 이름, 거리 방식.
 
-서버(app)의 DB·API 도 이 값을 그대로 쓴다(app.labeling.models 가 여기서 가져간다).
+서버의 라벨링 워커도 이 값을 그대로 쓴다.
 """
 from __future__ import annotations
 

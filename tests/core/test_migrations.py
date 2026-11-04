@@ -175,3 +175,39 @@ def test_0006_keeps_models_and_can_be_undone(empty_engine):
     assert "dataset_id" not in columns_after
     assert "uq_models_applied_scope" in schema_after
     assert "dataset_id" in columns_undone
+
+
+def test_0007_keeps_labeling_images_and_can_be_undone(empty_engine):
+    now = "2026-11-01 00:00:00"
+    with empty_engine.connect() as conn:
+        command.upgrade(_alembic(conn), "0006")
+        conn.execute(text(
+            "INSERT INTO jobs (id, job_type, status, payload, created_at, updated_at) "
+            "VALUES (1, 'labeling', 'succeeded', '{}', :now, :now)"
+        ), {"now": now})
+        conn.execute(text(
+            "INSERT INTO models (id, type, model_name, model_version, task, applied, created_at) "
+            "VALUES (1, 'line', 'm', '1', 'detection', 0, :now)"
+        ), {"now": now})
+        conn.execute(text(
+            "INSERT INTO labelings (id, job_id, model_id, source_path, params, images_done, images_total) "
+            "VALUES (1, 1, 1, '/images', '{}', 1, 1)"
+        ))
+        conn.execute(text(
+            "INSERT INTO labeling_images (id, labeling_id, image_path, width, height, labels, num_labels, suggested) "
+            "VALUES (5, 1, 'a.jpg', 10, 10, '[]', 0, 'review')"
+        ))
+        conn.commit()
+
+        command.upgrade(_alembic(conn), "0007")
+        conn.commit()
+        image = conn.execute(text("SELECT id, image_path, predictions FROM labeling_images")).one()
+
+        command.downgrade(_alembic(conn), "0006")
+        conn.commit()
+        kept = conn.execute(text("SELECT id FROM labeling_images")).scalars().all()
+        columns = [row.name for row in conn.execute(text("PRAGMA table_info(labeling_images)"))]
+
+    assert tuple(image) == (5, "a.jpg", None)
+    assert kept == [5]
+    assert "predictions" not in columns
