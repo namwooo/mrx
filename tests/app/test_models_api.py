@@ -1,4 +1,5 @@
 from datetime import datetime
+from itertools import count
 
 import pytest
 from fastapi import FastAPI
@@ -10,11 +11,13 @@ from app.services import model as model_service
 from core import jobs as job_repo
 from core.db import SessionLocal
 from core.jobs import JobType
-from core.orm import ModelRow, ModelType, new_model_id
+from core.orm import ModelRow, ModelType
 
 BASE = "/v1/registry/models"
 WEIGHTS = b"weights-v1"
 METADATA = {"model_name": "defect-detector", "model_version": "1.4.0", "task": "detection"}
+MISSING_ID = 99999
+versions = count(1)
 
 
 @pytest.fixture
@@ -50,11 +53,11 @@ def _line_model(name="line-model", line="LINE3", task="detection"):
     model = ModelRow(
         type=ModelType.LINE.value,
         model_name=name,
-        model_version=new_model_id(),
+        model_version=str(next(versions)),
         task=task,
         line=line,
-        training_id="trn_01HZX3K9",
-        dataset_id="ds_01HZX1A2",
+        training_id=7,
+        dataset_id=8,
         metrics={"mAP50": 0.742},
     )
     with SessionLocal() as session:
@@ -81,7 +84,7 @@ def _assert_problem(res, status, code):
 def test_register_init_model(client, weights, tmp_path):
     model = _create(client, weights)
 
-    assert model["model_id"].startswith("mdl_")
+    assert model["model_id"] >= 1
     assert model["type"] == "init"
     assert model["metadata"] == METADATA
     assert model["applied"] is False
@@ -110,19 +113,21 @@ def test_register_keeps_line_of_init_model(client, weights):
     {"metadata": None},                                                # metadata missing
     {"weights_path": None},                                            # init needs weights
     {"weights_path": ""},                                              # empty path
-    {"training_id": "trn_1"},                                          # init cannot have a training
-    {"init_training_id": "itr_1"},                                     # init cannot have an init training
+    {"training_id": 1},                                                # init cannot have a training
+    {"init_training_id": 1},                                           # init cannot have an init training
     {"metadata": {**METADATA, "task": ""}},                            # empty task
     {"metadata": {**METADATA, "model_name": "../../etc"}},             # would leave the registry
     {"metadata": {**METADATA, "model_name": ".."}},
     {"metadata": {**METADATA, "model_version": "1/2"}},
-    {"type": "line", "weights_path": None, "training_id": "trn_1"},    # line needs metadata.line
+    {"type": "line", "weights_path": None, "training_id": 1},          # line needs metadata.line
     {"type": "line", "weights_path": None,
      "metadata": {**METADATA, "line": "LINE3"}},                       # line needs a source
     {"type": "line", "weights_path": None, "metadata": {**METADATA, "line": "LINE3"},
-     "training_id": "trn_1", "init_training_id": "itr_1"},             # line takes only one source
-    {"type": "line", "training_id": "trn_1",
+     "training_id": 1, "init_training_id": 2},                         # line takes only one source
+    {"type": "line", "training_id": 1,
      "metadata": {**METADATA, "line": "LINE3"}},                       # line takes no weights_path
+    {"type": "line", "weights_path": None, "training_id": "trn_1",
+     "metadata": {**METADATA, "line": "LINE3"}},                       # ids are integers
 ])
 def test_register_rejects_invalid_body_with_400(client, weights, change):
     body = {k: v for k, v in {**_body(weights), **change}.items() if v is not None}
@@ -157,7 +162,7 @@ def test_register_duplicate_returns_409_and_keeps_first_file(client, weights, tm
 
     stored = tmp_path / "registry" / "defect-detector" / "1.4.0" / "best.pt"
     assert stored.read_bytes() == WEIGHTS
-    assert [m.model_id for m in _stored_models()] == [first["model_id"]]
+    assert [m.id for m in _stored_models()] == [first["model_id"]]
 
 
 def test_register_losing_a_race_returns_409_and_keeps_first_file(client, weights, tmp_path, monkeypatch):
@@ -177,8 +182,8 @@ def test_same_name_with_new_version_is_allowed(client, weights):
     assert _create(client, weights, model_version="1.5.0")["metadata"]["model_version"] == "1.5.0"
 
 
-def test_register_line_model_is_not_supported_yet(client):
-    body = {"type": "line", "metadata": {**METADATA, "line": "LINE3"}, "training_id": "trn_1"}
+def test_register_from_a_retraining_is_not_supported_yet(client):
+    body = {"type": "line", "metadata": {**METADATA, "line": "LINE3"}, "training_id": 1}
     _assert_problem(client.post(BASE, json=body), 501, "not-implemented")
 
 
@@ -189,18 +194,37 @@ def test_get_model(client, weights):
 
 def test_get_line_model_shows_its_sources(client):
     record = _line_model()
-    model = client.get(f"{BASE}/{record.model_id}").json()
+    model = client.get(f"{BASE}/{record.id}").json()
 
-    assert model["training_id"] == "trn_01HZX3K9"
-    assert model["dataset_id"] == "ds_01HZX1A2"
+    assert model["training_id"] == 7
+    assert model["dataset_id"] == 8
     assert model["metrics"] == {"mAP50": 0.742}
     assert model["metadata"]["line"] == "LINE3"
 
 
 def test_get_missing_model_returns_404(client):
-    res = client.get(f"{BASE}/mdl_NOPE")
+    res = client.get(f"{BASE}/{MISSING_ID}")
     _assert_problem(res, 404, "not-found")
-    assert res.json()["detail"] == "model 'mdl_NOPE' not found"
+    assert res.json()["detail"] == f"model '{MISSING_ID}' not found"
+
+
+@pytest.mark.parametrize("model_id", ["abc", "0", "mdl_1"])
+def test_invalid_model_id_returns_400(client, model_id):
+    _assert_problem(client.get(f"{BASE}/{model_id}"), 400, "invalid-request")
+    _assert_problem(client.post(f"{BASE}/{model_id}/apply"), 400, "invalid-request")
+    _assert_problem(client.post(f"{BASE}/{model_id}/export", json={"format": "pt"}), 400, "invalid-request")
+
+
+def test_ids_count_up_and_are_never_reused(client, weights):
+    first = _create(client, weights)["model_id"]
+    second = _create(client, weights, model_version="1.5.0")["model_id"]
+    assert second == first + 1
+
+    with SessionLocal() as session:
+        session.delete(session.get(ModelRow, second))
+        session.commit()
+
+    assert _create(client, weights, model_version="1.6.0")["model_id"] == second + 1
 
 
 def test_list_newest_first_with_pagination(client, weights):
@@ -216,18 +240,18 @@ def test_list_filters(client, weights):
     init = _create(client, weights)
     other = _line_model(name="other", line="LINE1", task="classification")
     applied = _line_model(name="applied", line="LINE3")
-    client.post(f"{BASE}/{applied.model_id}/apply")
+    client.post(f"{BASE}/{applied.id}/apply")
 
     def ids(**params):
         return {m["model_id"] for m in client.get(BASE, params=params).json()}
 
     assert ids(type="init") == {init["model_id"]}
-    assert ids(type="line") == {other.model_id, applied.model_id}
-    assert ids(model_name="other") == {other.model_id}
-    assert ids(line="LINE3") == {applied.model_id}
-    assert ids(task="classification") == {other.model_id}
-    assert ids(applied="true") == {applied.model_id}
-    assert ids(applied="false") == {init["model_id"], other.model_id}
+    assert ids(type="line") == {other.id, applied.id}
+    assert ids(model_name="other") == {other.id}
+    assert ids(line="LINE3") == {applied.id}
+    assert ids(task="classification") == {other.id}
+    assert ids(applied="true") == {applied.id}
+    assert ids(applied="false") == {init["model_id"], other.id}
     assert ids(line="LINE3", task="classification") == set()
 
 
@@ -240,7 +264,7 @@ def test_list_rejects_invalid_query_with_400(client, params):
 
 def test_apply_model(client):
     record = _line_model()
-    res = client.post(f"{BASE}/{record.model_id}/apply", json={"comment": "mAP 3% 향상"})
+    res = client.post(f"{BASE}/{record.id}/apply", json={"comment": "mAP 3% 향상"})
 
     assert res.status_code == 200
     assert res.json()["applied"] is True
@@ -251,7 +275,7 @@ def test_apply_model(client):
 
 def test_apply_without_body(client):
     record = _line_model()
-    assert client.post(f"{BASE}/{record.model_id}/apply").json()["applied"] is True
+    assert client.post(f"{BASE}/{record.id}/apply").json()["applied"] is True
 
 
 def test_apply_replaces_model_of_the_same_line_and_task_only(client):
@@ -260,10 +284,10 @@ def test_apply_replaces_model_of_the_same_line_and_task_only(client):
     other_task = _line_model(name="other-task", task="classification")
     new = _line_model(name="new")
     for record in (old, other_line, other_task, new):
-        client.post(f"{BASE}/{record.model_id}/apply")
+        client.post(f"{BASE}/{record.id}/apply")
 
     applied = {m["model_id"] for m in client.get(BASE, params={"applied": "true"}).json()}
-    assert applied == {new.model_id, other_line.model_id, other_task.model_id}
+    assert applied == {new.id, other_line.id, other_task.id}
 
 
 def test_models_without_a_line_share_one_scope(client, weights):
@@ -278,34 +302,34 @@ def test_models_without_a_line_share_one_scope(client, weights):
 
 def test_apply_twice_keeps_it_applied(client):
     record = _line_model()
-    client.post(f"{BASE}/{record.model_id}/apply")
-    assert client.post(f"{BASE}/{record.model_id}/apply").json()["applied"] is True
+    client.post(f"{BASE}/{record.id}/apply")
+    assert client.post(f"{BASE}/{record.id}/apply").json()["applied"] is True
 
 
 def test_apply_writes_even_when_the_loaded_row_is_stale(client):
     model = _line_model(name="stale")
     other = _line_model(name="other")
-    client.post(f"{BASE}/{model.model_id}/apply")
+    client.post(f"{BASE}/{model.id}/apply")
 
     with SessionLocal() as session:
-        assert session.get(ModelRow, model.model_id).applied is True
-        client.post(f"{BASE}/{other.model_id}/apply")  # another request takes over while the row is loaded
-        model_service.apply_model(session, model.model_id, None)
+        assert session.get(ModelRow, model.id).applied is True
+        client.post(f"{BASE}/{other.id}/apply")  # another request takes over while the row is loaded
+        model_service.apply_model(session, model.id, None)
 
     applied = client.get(BASE, params={"applied": "true"}).json()
-    assert [m["model_id"] for m in applied] == [model.model_id]
+    assert [m["model_id"] for m in applied] == [model.id]
 
 
 def test_apply_missing_model_returns_404(client):
-    _assert_problem(client.post(f"{BASE}/mdl_NOPE/apply"), 404, "not-found")
+    _assert_problem(client.post(f"{BASE}/{MISSING_ID}/apply"), 404, "not-found")
 
 
 def test_db_refuses_two_applied_models_in_one_scope(client, app_db):
     a, b = _line_model(name="a"), _line_model(name="b")
     with app_db.begin() as conn:
-        conn.execute(update(ModelRow).where(ModelRow.model_id == a.model_id).values(applied=True))
+        conn.execute(update(ModelRow).where(ModelRow.id == a.id).values(applied=True))
     with pytest.raises(IntegrityError), app_db.begin() as conn:
-        conn.execute(update(ModelRow).where(ModelRow.model_id == b.model_id).values(applied=True))
+        conn.execute(update(ModelRow).where(ModelRow.id == b.id).values(applied=True))
 
 
 def test_export_queues_a_job(client, weights):
@@ -328,7 +352,7 @@ def test_export_rejects_unknown_format_with_400(client, weights):
 
 
 def test_export_missing_model_returns_404(client):
-    res = client.post(f"{BASE}/mdl_NOPE/export", json={"format": "onnx"})
+    res = client.post(f"{BASE}/{MISSING_ID}/export", json={"format": "onnx"})
     _assert_problem(res, 404, "not-found")
     assert job_repo.list_jobs(job_type=JobType.MODEL_EXPORT) == []
 

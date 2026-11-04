@@ -61,6 +61,7 @@ USER app
 ENV DB_PATH=/data/local.db \
     BATCH_OUTPUT_DIR=/data/batch_outputs \
     REGISTRY_DIR=/data/registry \
+    INIT_TRAINING_DIR=/data/init_trainings \
     INFERENCE_DEVICE=cpu \
     YOLO_CONFIG_DIR=/tmp/Ultralytics \
     PORT=8000

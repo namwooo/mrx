@@ -68,7 +68,7 @@ def test_handler_is_registered():
 
 
 def test_pt_export_is_the_registered_weights(model):
-    result = handle_model_export_job(_job({"model_id": model.model_id, "format": "pt"}))
+    result = handle_model_export_job(_job({"model_id": model.id, "format": "pt"}))
 
     assert result == {
         "file_path": model.weights_path,
@@ -78,7 +78,7 @@ def test_pt_export_is_the_registered_weights(model):
 
 @pytest.mark.parametrize("export_format, file_name", [("onnx", "model.onnx"), ("torchscript", "model.torchscript")])
 def test_converted_export_lands_next_to_the_weights(model, fake_yolo, tmp_path, export_format, file_name):
-    result = handle_model_export_job(_job({"model_id": model.model_id, "format": export_format}))
+    result = handle_model_export_job(_job({"model_id": model.id, "format": export_format}))
 
     folder = tmp_path / "defect-detector" / "1.4.0"
     assert result["file_path"] == str(folder / file_name)
@@ -88,12 +88,12 @@ def test_converted_export_lands_next_to_the_weights(model, fake_yolo, tmp_path, 
 
 def test_engine_format_is_not_supported_yet(model):
     with pytest.raises(ValueError, match="engine"):
-        handle_model_export_job(_job({"model_id": model.model_id, "format": "engine"}))
+        handle_model_export_job(_job({"model_id": model.id, "format": "engine"}))
 
 
 def test_missing_model_fails(app_db):
     with pytest.raises(ValueError, match="not found"):
-        handle_model_export_job(_job({"model_id": "mdl_NOPE", "format": "pt"}))
+        handle_model_export_job(_job({"model_id": 99999, "format": "pt"}))
 
 
 def test_model_without_weights_fails(app_db):
@@ -101,11 +101,11 @@ def test_model_without_weights_fails(app_db):
         type=ModelType.LINE.value, model_name="m", model_version="1", task="detection", line="LINE3",
     ))
     with pytest.raises(ValueError, match="no weights"):
-        handle_model_export_job(_job({"model_id": model.model_id, "format": "pt"}))
+        handle_model_export_job(_job({"model_id": model.id, "format": "pt"}))
 
 
 def test_worker_stores_the_export(model):
-    job = job_repo.enqueue_job(JobType.MODEL_EXPORT, {"model_id": model.model_id, "format": "pt"})
+    job = job_repo.enqueue_job(JobType.MODEL_EXPORT, {"model_id": model.id, "format": "pt"})
 
     assert Worker(JobType.MODEL_EXPORT, handle_model_export_job).run_once() is True
 
@@ -115,7 +115,7 @@ def test_worker_stores_the_export(model):
 
 
 def test_worker_records_an_unsupported_format_as_failed(model):
-    job = job_repo.enqueue_job(JobType.MODEL_EXPORT, {"model_id": model.model_id, "format": "engine"})
+    job = job_repo.enqueue_job(JobType.MODEL_EXPORT, {"model_id": model.id, "format": "engine"})
 
     Worker(JobType.MODEL_EXPORT, handle_model_export_job).run_once()
 

@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, Optional
 
-from core.db import Base
+from core.orm.base import Base
 from sqlalchemy import DateTime, Index, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -12,6 +12,7 @@ class JobType(str, Enum):
     BATCH = "batch"
     LABELING = "labeling"
     MODEL_EXPORT = "model_export"
+    INIT_TRAINING = "init_training"
 
 class JobStatus(str, Enum):
     QUEUED = "queued"

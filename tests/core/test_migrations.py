@@ -1,13 +1,16 @@
+import json
 import warnings
 
 import pytest
+from alembic import command
 from alembic.autogenerate import compare_metadata
+from alembic.config import Config
 from alembic.migration import MigrationContext
 from sqlalchemy import inspect, text
 
 from core.db import create_db_engine
 from core.db import engine as global_engine
-from core.migrate import upgrade_db
+from core.migrate import MIGRATIONS_DIR, upgrade_db
 from core.orm import metadata
 
 
@@ -73,6 +76,67 @@ def test_upgrade_adopts_a_database_from_before_alembic(empty_engine):
     assert _version(empty_engine)
     with empty_engine.connect() as conn:
         assert conn.execute(text("SELECT id FROM jobs")).scalars().all() == [7]
+
+
+def _alembic(conn):
+    config = Config()
+    config.set_main_option("script_location", str(MIGRATIONS_DIR))
+    config.attributes["connection"] = conn
+    return config
+
+
+def _seed_string_ids(conn):
+    for model_id, version, created_at, applied in (
+            ("mdl_ZZZZZZZZ", "1", "2026-11-01 00:00:00", 0),
+            ("mdl_AAAAAAAA", "2", "2026-11-02 00:00:00", 1),
+    ):
+        conn.execute(text(
+            "INSERT INTO models (model_id, type, model_name, model_version, task, applied, created_at) "
+            "VALUES (:id, 'init', 'm', :version, 'detection', :applied, :created_at)"
+        ), {"id": model_id, "version": version, "applied": applied, "created_at": created_at})
+    conn.execute(text(
+        "INSERT INTO jobs (id, job_type, status, payload, created_at, updated_at) VALUES "
+        "(1, 'model_export', 'queued', :export, '2026-11-02 00:00:00', '2026-11-02 00:00:00'), "
+        "(2, 'batch', 'queued', :batch, '2026-11-02 00:00:00', '2026-11-02 00:00:00')"
+    ), {
+        "export": json.dumps({"model_id": "mdl_AAAAAAAA", "format": "onnx"}),
+        "batch": json.dumps({"model_id": "keep-me"}),
+    })
+
+
+def test_0002_keeps_models_and_their_export_jobs(empty_engine):
+    with empty_engine.connect() as conn:
+        command.upgrade(_alembic(conn), "0001")
+        _seed_string_ids(conn)
+        conn.commit()
+        command.upgrade(_alembic(conn), "0002")
+        conn.commit()
+
+        models_after = conn.execute(text("SELECT id, model_version, applied FROM models ORDER BY id")).all()
+        payloads = dict(conn.execute(text("SELECT id, payload FROM jobs")).all())
+
+    assert [tuple(row) for row in models_after] == [(1, "1", 0), (2, "2", 1)]  # the oldest gets the first id
+    assert json.loads(payloads[1]) == {"model_id": 2, "format": "onnx"}
+    assert json.loads(payloads[2]) == {"model_id": "keep-me"}
+
+
+def test_0002_can_be_undone(empty_engine):
+    with empty_engine.connect() as conn:
+        command.upgrade(_alembic(conn), "0001")
+        _seed_string_ids(conn)
+        conn.commit()
+        before = _schema(empty_engine)
+        command.upgrade(_alembic(conn), "0002")
+        conn.commit()
+        command.downgrade(_alembic(conn), "0001")
+        conn.commit()
+
+        ids = conn.execute(text("SELECT model_id FROM models ORDER BY created_at")).scalars().all()
+        payload = conn.execute(text("SELECT payload FROM jobs WHERE id = 1")).scalar()
+
+    assert _schema(empty_engine) == before
+    assert ids == ["mdl_1", "mdl_2"]
+    assert json.loads(payload) == {"model_id": "mdl_2", "format": "onnx"}
 
 
 def test_upgrade_twice_changes_nothing(empty_engine):

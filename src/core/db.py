@@ -1,15 +1,12 @@
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
-from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
-
-
-class Base(DeclarativeBase):
-    pass
+from sqlalchemy.orm import Session, sessionmaker
 
 
 def create_db_engine(path: str) -> Engine:
@@ -30,3 +27,10 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 def get_session() -> Iterator[Session]:
     with SessionLocal() as session:
         yield session
+
+
+def as_utc(value: Optional[datetime]) -> Optional[datetime]:
+    """SQLite drops the time zone. Every stored time is UTC."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=timezone.utc)

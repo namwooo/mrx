@@ -1,23 +1,15 @@
-import secrets
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Dict, Optional
 
-from core.db import Base
+from core.orm.base import Base
 from sqlalchemy import DateTime, Index, JSON, String, Text, UniqueConstraint, func, text
 from sqlalchemy.orm import Mapped, mapped_column
-
-ID_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
-ID_LENGTH = 8
 
 
 class ModelType(str, Enum):
     LINE = "line"
     INIT = "init"
-
-
-def new_model_id() -> str:
-    return "mdl_" + "".join(secrets.choice(ID_ALPHABET) for _ in range(ID_LENGTH))
 
 
 def _now() -> datetime:
@@ -28,18 +20,20 @@ class ModelRow(Base):
     __tablename__ = "models"
     __table_args__ = (
         UniqueConstraint("model_name", "model_version", name="uq_models_name_version"),
+        Index("uq_models_init_training", "init_training_id", unique=True),
+        {"sqlite_autoincrement": True},
     )
 
-    model_id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_model_id)
+    id: Mapped[int] = mapped_column(primary_key=True)
     type: Mapped[str] = mapped_column(String(16))
     model_name: Mapped[str] = mapped_column(String(128))
     model_version: Mapped[str] = mapped_column(String(64))
     task: Mapped[str] = mapped_column(String(64))
     line: Mapped[Optional[str]] = mapped_column(String(64))
     weights_path: Mapped[Optional[str]] = mapped_column(Text)
-    training_id: Mapped[Optional[str]] = mapped_column(String(32))
-    init_training_id: Mapped[Optional[str]] = mapped_column(String(32))
-    dataset_id: Mapped[Optional[str]] = mapped_column(String(32))
+    training_id: Mapped[Optional[int]]
+    init_training_id: Mapped[Optional[int]]
+    dataset_id: Mapped[Optional[int]]
     metrics: Mapped[Optional[Dict[str, float]]] = mapped_column(JSON(none_as_null=True))
     applied: Mapped[bool] = mapped_column(default=False)
     applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
