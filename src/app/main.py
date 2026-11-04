@@ -5,7 +5,7 @@ from core.migrate import upgrade_db
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.openapi.docs import get_swagger_ui_html
-from .routers import batches, init_trainings, labelings, trainings, models
+from .routers import init_trainings, labelings, trainings, models
 
 STATIC_DIR = Path(__file__).parent / "static"
 OPENAPI_URL = "/openapi.json"
@@ -35,7 +35,6 @@ def swagger_ui():
     )
 
 app.include_router(init_trainings.router)
-app.include_router(batches.router)
 app.include_router(labelings.router)
 app.include_router(trainings.router)
 app.include_router(models.router)
