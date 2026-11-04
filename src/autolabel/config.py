@@ -1,6 +1,6 @@
 """라이브러리 설정 묶음. 라이브러리는 환경 변수를 읽지 않고, 호출하는 쪽이 이 객체를 만들어 넘긴다.
 
-기본값은 서버 설정(app.config.Settings 의 VISIONOPS_LABELING_*) 기본값과 같다(tests/test_visionops_labeling.py 가 확인).
+기본값은 서버 설정(app.config.Settings 의 VISIONOPS_LABELING_*) 기본값과 같다.
 서버는 app.labeling.configs 에서 Settings → 이 객체로 바꾼다.
 """
 from __future__ import annotations

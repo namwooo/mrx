@@ -34,7 +34,6 @@ class ModelRow(Base):
     weights_path: Mapped[Optional[str]] = mapped_column(Text)
     training_id: Mapped[Optional[int]]
     init_training_id: Mapped[Optional[int]]
-    dataset_id: Mapped[Optional[int]]
     metrics: Mapped[Optional[Dict[str, float]]] = mapped_column(JSON(none_as_null=True))
     applied: Mapped[bool] = mapped_column(default=False)
     applied_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

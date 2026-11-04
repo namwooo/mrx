@@ -146,3 +146,32 @@ def test_upgrade_twice_changes_nothing(empty_engine):
     _upgrade(empty_engine)
 
     assert _schema(empty_engine) == before
+
+
+def _model_columns(conn):
+    return [row.name for row in conn.execute(text("PRAGMA table_info(models)"))]
+
+
+def test_0006_keeps_models_and_can_be_undone(empty_engine):
+    with empty_engine.connect() as conn:
+        command.upgrade(_alembic(conn), "0005")
+        conn.execute(text(
+            "INSERT INTO models (id, type, model_name, model_version, task, dataset_id, applied, created_at) "
+            "VALUES (3, 'init', 'm', '1', 'detection', 8, 1, '2026-11-01 00:00:00')"
+        ))
+        conn.commit()
+
+        command.upgrade(_alembic(conn), "0006")
+        conn.commit()
+        model = conn.execute(text("SELECT id, model_name, applied FROM models")).one()
+        columns_after = _model_columns(conn)
+        schema_after = _schema(empty_engine)
+
+        command.downgrade(_alembic(conn), "0005")
+        conn.commit()
+        columns_undone = _model_columns(conn)
+
+    assert tuple(model) == (3, "m", 1)
+    assert "dataset_id" not in columns_after
+    assert "uq_models_applied_scope" in schema_after
+    assert "dataset_id" in columns_undone

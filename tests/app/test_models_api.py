@@ -57,7 +57,6 @@ def _line_model(name="line-model", line="LINE3", task="detection", training_id=N
         task=task,
         line=line,
         training_id=training_id,
-        dataset_id=8,
         metrics={"mAP50": 0.742},
     )
     with SessionLocal() as session:
@@ -197,7 +196,6 @@ def test_get_line_model_shows_its_sources(client):
     model = client.get(f"{BASE}/{record.id}").json()
 
     assert model["training_id"] == 7
-    assert model["dataset_id"] == 8
     assert model["metrics"] == {"mAP50": 0.742}
     assert model["metadata"]["line"] == "LINE3"
 

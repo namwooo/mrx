@@ -1,4 +1,4 @@
-# visionops_labeling
+# autolabel
 
 검사 모델 자동라벨링의 **판정 신호 · 판정 규칙 · 거리 통계 · 평가 · 임계값 보정**을 담은 라이브러리다.
 서버(`app.labeling`)에서 계산 부분만 떼어 냈다. 서버 구조를 바꾸거나 새로 짜도 이 라이브러리를 그대로 가져다 쓰고,
@@ -27,15 +27,14 @@
 | `plugins.py` | 신호 플러그인 규격: 외부(제이비소프트)가 모델 고유 신호를 붙이는 지점 | — |
 | `conformance.py` | 연동 확인 도구: 분류 어댑터·신호 플러그인 검사, 명령줄 실행 | — |
 
-**경계는 시험으로 지킨다.** `tests/test_visionops_labeling.py::test_library_has_no_server_dependencies` 가 확인한다.
-라이브러리를 import 해도 `app` · fastapi · sqlalchemy · torch · ultralytics 를 불러오지 않아야 한다.
+**경계:** 라이브러리를 import 해도 `app` · fastapi · sqlalchemy · torch · ultralytics 를 불러오지 않아야 한다.
 
 ## 서버가 쓰는 방식 (검출)
 
 ```python
-from visionops_labeling.tasks import detect
-from visionops_labeling.config import TtaConfig, RuleConfig
-from visionops_labeling.stages import class_stages
+from autolabel.tasks import detect
+from autolabel.config import TtaConfig, RuleConfig
+from autolabel.stages import class_stages
 
 setup = detect.SignalSetup(
     task="detect", enabled=True, variants=detect.tta_variants(TtaConfig()), match_iou=0.3,
@@ -56,7 +55,7 @@ for item in detect.analyze(predictor, arrays, {"conf": 0.05, "iou": 0.7, "max_de
 ## 분류 (참조 구현)
 
 ```python
-from visionops_labeling.tasks import classify
+from autolabel.tasks import classify
 
 info = classify.ModelInfo.from_adapter(adapter)             # 분류 어댑터 규격 1.0 의 Adapter
 model = adapter.load(weights, "cuda:0", {})                 # LoadedModel: predict → (N, C), embed → (N, D)
@@ -77,7 +76,7 @@ for item in classify.analyze(model, arrays, setup, production=production_model):
 판정·보정·감사는 플랫폼이 한다. 플러그인이 실패하면 그 묶음의 이미지들만 검수로 보내고(`plugin_error:<이름>`), 작업은 계속한다.
 
 ```bash
-python -m visionops_labeling.conformance classifier --adapter dotting --weights dotting.keras --images samples/ \
+python -m autolabel.conformance classifier --adapter dotting --weights dotting.keras --images samples/ \
     --plugin dotting_attention
 ```
 
@@ -105,6 +104,5 @@ python -m visionops_labeling.conformance classifier --adapter dotting --weights 
 ## 시험
 
 ```bash
-python -m pytest tests/test_visionops_labeling.py      # 라이브러리 단독(경계·설정·분류·플러그인·확인 도구)
 python -m pytest                                       # 서버 전체: 검출은 서버 시험이 같은 코드를 지나간다
 ```

@@ -28,7 +28,7 @@ ENTRY_POINT_GROUP = "visionops.labeling_signals"
 NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]{1,39}$")
 DETAIL_MAX_BYTES = 4096
 
-logger = logging.getLogger("visionops_labeling")
+logger = logging.getLogger("autolabel")
 
 
 @dataclass(frozen=True)

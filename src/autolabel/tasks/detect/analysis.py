@@ -23,7 +23,7 @@ from . import signals as sig
 from .predictor import Predictor
 from .rules import RuleParams
 
-logger = logging.getLogger("visionops_labeling")
+logger = logging.getLogger("autolabel")
 
 
 # [박스 정리] 클래스 구성에 없는 클래스는 버리고, 이미지 밖으로 나간 좌표는 자르고, 면적이 0 이 된 박스는 버린다.

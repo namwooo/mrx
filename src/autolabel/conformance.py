@@ -1,6 +1,6 @@
 """라벨링 연동 확인 도구 (라벨링 확장 규격 1.0 7장). 외부 개발사가 납품 전에 스스로 확인하고, 플랫폼 검수에도 같은 것을 쓴다.
 
-    python -m visionops_labeling.conformance classifier --adapter dotting --weights w.keras --images samples/ [--device cpu]
+    python -m autolabel.conformance classifier --adapter dotting --weights w.keras --images samples/ [--device cpu]
                                                         [--plugin dotting_attention ...]
 
 어댑터는 entry point 그룹 visionops.adapters(분류 어댑터 규격 1.0), 플러그인은 visionops.labeling_signals 에서 찾는다.
@@ -183,7 +183,7 @@ def _images(folder: Path, decode: str, limit: int) -> list[np.ndarray]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m visionops_labeling.conformance")
+    parser = argparse.ArgumentParser(prog="python -m autolabel.conformance")
     sub = parser.add_subparsers(dest="command", required=True)
     c = sub.add_parser("classifier", help="분류 어댑터 + (선택) 신호 플러그인 확인")
     c.add_argument("--adapter", required=True, help="어댑터 이름 (entry point visionops.adapters)")

@@ -86,7 +86,6 @@ class Model(BaseModel):
     metadata: ModelMetadata
     training_id: Optional[int] = None
     init_training_id: Optional[int] = None
-    dataset_id: Optional[int] = None
     metrics: Optional[Dict[str, float]] = None
     weights_path: Optional[str] = None
     applied: bool
@@ -107,7 +106,6 @@ class Model(BaseModel):
             ),
             training_id=record.training_id,
             init_training_id=record.init_training_id,
-            dataset_id=record.dataset_id,
             metrics=record.metrics,
             weights_path=record.weights_path,
             applied=record.applied,
